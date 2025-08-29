@@ -1,31 +1,19 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 
 /**
- * Superflight (clean-room), client-side WebGL prototype
- * ----------------------------------------------------
- * - React + Three.js single-file implementation
- * - Procedural "worlds" with rocky spires, arches, and a tube-like cave
- * - Third-person wingsuit flight with pitch/yaw/roll, proximity scoring, portals to new worlds
- * - Minimal HUD (score, multiplier, speed, seed, help)
+ * Superflight (clean-room) — Downhill Wingsuit (WebGL)
+ * ---------------------------------------------------
+ * Implements a downhill GLIDE (not forward rail) with keyboard-only controls,
+ * and a single massive "mountain" made of instanced rocks with carved tunnels.
  *
- * Notes
- * -----
- * This is a compact MVP aimed at demonstrating the full loop:
- *   input → flight model → collision/proximity → scoring → portal → next world
- * For clarity and portability, the code avoids external helper libs. Three.js is the only dependency.
- * The collider system uses coarse spheres on obstacles for performance & simplicity.
- *
- * Controls
- * --------
- *   Mouse move  : pitch (vertical) + yaw (horizontal)
- *   W / S       : pitch up / down (adds to mouse)
- *   A / D       : roll left / right
- *   Q / E       : yaw left / right
- *   R           : restart after crash
- *   P           : pause/resume
- *
- * Tuning points are marked with //! TUNE.
+ * What changed vs previous prototype
+ * - Flight is gravity + glide thrust along forward; you always descend overall
+ * - Keyboard-only: W/S=pitch, A/D=yaw (turn), Q/E=barrel roll
+ * - Big noise-y mountain built from thousands of instanced boulders; holes are
+ *   carved by skipping rock placement along procedural tunnel paths + random
+ *   “nibbles.”
+ * - Portal sits deep below to transition to a fresh mountain.
  */
 
 // -------------------- Utility: seeded RNG --------------------
@@ -39,35 +27,20 @@ function mulberry32(seed) {
   };
 }
 
-function randRange(rng, min, max) {
-  return min + (max - min) * rng();
-}
-
-function choose(rng, arr) {
-  return arr[Math.floor(rng() * arr.length)];
-}
+function randRange(rng, min, max) { return min + (max - min) * rng(); }
+function choose(rng, arr) { return arr[Math.floor(rng() * arr.length)]; }
 
 // -------------------- Color Palettes --------------------
 const THEMES = [
-  // terrain, portal, skyTop, skyBottom
-  [0x5c715e, 0xffcc66, 0x3a4d73, 0x87b7e6], // pine + amber, dusk sky
-  [0x6c5b7b, 0xf67280, 0x2a2b4a, 0x7a85a3], // mauve + coral, twilight
-  [0x3a7d44, 0xfaf3dd, 0x274060, 0x97c1e7], // forest + cream, cool
-  [0x8e5a33, 0xf2d492, 0x3c3e44, 0x99b2c6], // canyon + sand, overcast
-  [0x3d405b, 0xe07a5f, 0x16222a, 0x3a6073], // slate + orange, moody
+  [0x5c715e, 0xffcc66, 0x3a4d73, 0x87b7e6],
+  [0x6c5b7b, 0xf67280, 0x2a2b4a, 0x7a85a3],
+  [0x3a7d44, 0xfaf3dd, 0x274060, 0x97c1e7],
+  [0x8e5a33, 0xf2d492, 0x3c3e44, 0x99b2c6],
+  [0x3d405b, 0xe07a5f, 0x16222a, 0x3a6073],
 ];
 
-// -------------------- Types --------------------
-/** Collider shape (all spheres for simplicity) */
-class SphereCollider {
-  constructor(center, radius, tag = "rock") {
-    this.center = center; // THREE.Vector3
-    this.radius = radius; // number
-    this.tag = tag; // "rock" | "portal"
-  }
-}
+class SphereCollider { constructor(center, radius, tag = "rock") { this.center = center; this.radius = radius; this.tag = tag; } }
 
-// -------------------- Main Component --------------------
 export default function SuperflightCleanRoom() {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
@@ -79,124 +52,69 @@ export default function SuperflightCleanRoom() {
   const portalMeshRef = useRef(null);
   const collidersRef = useRef([]);
 
-  const [ui, setUI] = useState({
-    score: 0,
-    multiplier: 1,
-    speed: 0,
-    crashed: false,
-    paused: false,
-    worldSeed: 1,
-    highScore: 0,
-    difficulty: 1,
-  });
+  const [ui, setUI] = useState({ score: 0, multiplier: 1, speed: 0, crashed: false, paused: false, worldSeed: 1, highScore: 0, difficulty: 1 });
 
-  // Input state
-  const inputsRef = useRef({
-    keyW: false,
-    keyS: false,
-    keyA: false,
-    keyD: false,
-    keyQ: false,
-    keyE: false,
-    mouseX: 0,
-    mouseY: 0,
-    lastMouseX: 0,
-    lastMouseY: 0,
-    mouseDX: 0,
-    mouseDY: 0,
-    hasMouse: false,
-  });
+  // Input
+  const inputsRef = useRef({ keyW: false, keyS: false, keyA: false, keyD: false, keyQ: false, keyE: false });
 
-  // Game/physics state
+  // Physics / game state
   const stateRef = useRef({
-    playerPos: new THREE.Vector3(0, 5, 10),
+    playerPos: new THREE.Vector3(0, 180, 0),
     playerQuat: new THREE.Quaternion(),
-    playerRadius: 0.8, // //! TUNE
+    playerRadius: 0.9,
 
-    baseSpeed: 40, // //! TUNE: forward speed baseline
-    maxSpeed: 95,
-    speed: 40,
-    speedGain: 45, // how much pitching down increases speed
+    vel: new THREE.Vector3(0, -20, -5), // initial down-forward
 
-    yawRate: THREE.MathUtils.degToRad(80), // //! TUNE
-    pitchRate: THREE.MathUtils.degToRad(65),
-    rollRate: THREE.MathUtils.degToRad(120),
+    gravity: 22,           // //! TUNE (units/s^2)
+    glideAccel: 40,        // thrust along forward based on pitch-down
+    drag: 0.65,            // linear drag
+    maxSpeed: 120,
+
+    yawRate: THREE.MathUtils.degToRad(85),
+    pitchRate: THREE.MathUtils.degToRad(70),
+    rollRate: THREE.MathUtils.degToRad(140),
 
     score: 0,
     multiplier: 1,
     maxMultiplier: 12,
-    proxThreshold: 6.0, // distance to surface where proximity starts counting
-    proxActive: false,
-    proxTimer: 0,
-    proxDropTimer: 0,
+    proxThreshold: 5.5,
 
     crashed: false,
     paused: false,
     worldSeed: Math.floor(Math.random() * 1e9),
     difficulty: 1,
 
-    // book-keeping
-    lastTime: 0,
+    mountainTopY: 140,
+    mountainBottomY: -1400,
   });
 
-  // ------------- Scene Setup -------------
+  // -------------------- Scene Setup --------------------
   useEffect(() => {
     const container = mountRef.current;
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    // Sky (vertical gradient via fog + big ambient light)
-    const themeIndex = 0;
-    const theme = THEMES[themeIndex];
-    const skyTop = new THREE.Color(theme[2]);
-    const skyBottom = new THREE.Color(theme[3]);
+    const theme = THEMES[0];
+    scene.fog = new THREE.Fog(new THREE.Color(theme[3]), 80, 1800);
 
-    // Fake gradient by fog color interpolation; also add a big sky dome.
-    scene.fog = new THREE.Fog(skyBottom.getHex(), 60, 500);
-
-    // Camera
-    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 2000);
-    camera.position.set(0, 6, 18);
+    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 4000);
+    camera.position.set(0, 185, 15);
     cameraRef.current = camera;
 
-    // Lights
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
-    hemi.position.set(0, 200, 0);
-    scene.add(hemi);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0); hemi.position.set(0, 200, 0); scene.add(hemi);
+    const dir = new THREE.DirectionalLight(0xffffff, 0.9); dir.position.set(-50, 120, 10); scene.add(dir);
 
-    const dir = new THREE.DirectionalLight(0xffffff, 0.9);
-    dir.position.set(-30, 50, 10);
-    scene.add(dir);
-
-    // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(container.clientWidth, container.clientHeight);
-    rendererRef.current = renderer;
-    container.appendChild(renderer.domElement);
+    rendererRef.current = renderer; container.appendChild(renderer.domElement);
 
-    // Glider visual
-    const glider = buildGliderMesh();
-    gliderRef.current = glider;
-    scene.add(glider);
+    const glider = buildGliderMesh(); gliderRef.current = glider; scene.add(glider);
+    const world = new THREE.Group(); worldGroupRef.current = world; scene.add(world);
 
-    // World group placeholder
-    const world = new THREE.Group();
-    worldGroupRef.current = world;
-    scene.add(world);
+    generateMountainWorld(stateRef.current.worldSeed, scene, world, collidersRef, portalMeshRef, stateRef.current);
 
-    // Generate first world
-    generateWorld(stateRef.current.worldSeed, scene, world, collidersRef, portalMeshRef);
-
-    // Events
-    const onResize = () => {
-      if (!container || !rendererRef.current || !cameraRef.current) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      rendererRef.current.setSize(w, h);
-      cameraRef.current.aspect = w / h;
-      cameraRef.current.updateProjectionMatrix();
-    };
+    const onResize = () => { if (!container || !rendererRef.current || !cameraRef.current) return; const w = container.clientWidth, h = container.clientHeight; rendererRef.current.setSize(w, h); cameraRef.current.aspect = w / h; cameraRef.current.updateProjectionMatrix(); };
     window.addEventListener("resize", onResize);
 
     const onKey = (e, down) => {
@@ -218,161 +136,108 @@ export default function SuperflightCleanRoom() {
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
 
-    const onMouseMove = (e) => {
-      const i = inputsRef.current;
-      i.hasMouse = true;
-      const rect = renderer.domElement.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      i.mouseDX = x - i.lastMouseX;
-      i.mouseDY = y - i.lastMouseY;
-      i.lastMouseX = x;
-      i.lastMouseY = y;
-    };
-    renderer.domElement.addEventListener("mousemove", onMouseMove);
-
-    const prevent = (e) => e.preventDefault();
-    renderer.domElement.addEventListener("wheel", prevent, { passive: false });
-
-    // Start loop
     const clock = new THREE.Clock();
-    stateRef.current.lastTime = 0;
-    const loop = () => {
-      rafRef.current = requestAnimationFrame(loop);
-      const dt = clock.getDelta();
-      tick(dt);
-      renderer.render(scene, camera);
-    };
+    const loop = () => { rafRef.current = requestAnimationFrame(loop); const dt = Math.min(0.05, clock.getDelta()); tick(dt); renderer.render(scene, camera); };
     loop();
 
-    // Cleanup
     return () => {
       cancelAnimationFrame(rafRef.current);
       window.removeEventListener("resize", onResize);
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
-      renderer.domElement.removeEventListener("mousemove", onMouseMove);
-      renderer.domElement.removeEventListener("wheel", prevent);
-
       disposeWorld(worldGroupRef.current);
-      if (gliderRef.current) gliderRef.current.geometry.dispose();
-      if (gliderRef.current && gliderRef.current.material) gliderRef.current.material.dispose();
-
-      renderer.dispose();
-      container.removeChild(renderer.domElement);
+      if (gliderRef.current) { gliderRef.current.traverse((o)=>{ if(o.isMesh){ o.geometry?.dispose?.(); o.material?.dispose?.(); } }); }
+      renderer.dispose(); container.removeChild(renderer.domElement);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ------------- Core Tick -------------
+  // -------------------- Core Tick --------------------
   const tick = (dt) => {
-    const st = stateRef.current;
-    const cam = cameraRef.current;
-    const glider = gliderRef.current;
-    if (!cam || !glider) return;
+    const st = stateRef.current; const cam = cameraRef.current; const glider = gliderRef.current; if (!cam || !glider) return; if (st.paused || st.crashed) return;
 
-    if (st.paused) return;
-
-    // Skip updates after crash (wait for R)
-    if (st.crashed) return;
-
-    // INPUT → ORIENTATION
+    // Orientation from keyboard only
     const inp = inputsRef.current;
+    const yaw = ((inp.keyD ? 1 : 0) - (inp.keyA ? 1 : 0)) * st.yawRate * dt;
+    const pitch = ((inp.keyS ? 1 : 0) - (inp.keyW ? 1 : 0)) * st.pitchRate * dt; // S = nose down, W = nose up (intuitive)
+    const roll = ((inp.keyE ? 1 : 0) - (inp.keyQ ? 1 : 0)) * st.rollRate * dt;
 
-    // Mouse deltas → small rates (frame-local), smoothed a bit
-    const mouseYaw = THREE.MathUtils.clamp(inp.mouseDX * 0.0025, -0.8, 0.8); // //! TUNE
-    const mousePitch = THREE.MathUtils.clamp(-inp.mouseDY * 0.0025, -0.8, 0.8);
-    // Reset deltas so we measure per-frame movement
-    inp.mouseDX *= 0.2; // slight decay to smooth
-    inp.mouseDY *= 0.2;
+    const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), yaw);
+    const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), pitch);
+    const qRoll = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), -roll);
+    st.playerQuat.multiply(qYaw).multiply(qPitch).multiply(qRoll).normalize();
 
-    const yawInput = (inp.keyQ ? 1 : 0) * st.yawRate * dt * 0.9 + mouseYaw * st.yawRate * dt;
-    const pitchInput = ((inp.keyS ? 1 : 0) - (inp.keyW ? 1 : 0)) * st.pitchRate * dt * 0.8 + mousePitch * st.pitchRate * dt;
-    const rollInput = ((inp.keyD ? 1 : 0) - (inp.keyA ? 1 : 0)) * st.rollRate * dt;
+    // Forward vector from orientation
+    const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(st.playerQuat).normalize();
 
-    const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawInput);
-    const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), pitchInput);
-    const qRoll = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -rollInput);
+    // Physics: gravity + glide thrust + drag
+    const pitchDown = Math.max(0, -fwd.y); // 0..1 (nose straight down)
+    const thrust = (0.25 + pitchDown) * st.glideAccel; // more thrust when steeper
+    st.vel.addScaledVector(new THREE.Vector3(0,-1,0), st.gravity * dt); // gravity
+    st.vel.addScaledVector(fwd, thrust * dt); // glide thrust
 
-    st.playerQuat.multiply(qYaw).multiply(qPitch).multiply(qRoll);
-    st.playerQuat.normalize();
+    // Drag
+    const drag = 1 - Math.exp(-st.drag * dt);
+    st.vel.multiplyScalar(1 - drag);
 
-    // SPEED from pitch (nose down → faster)
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(st.playerQuat);
-    const pitchDown = Math.max(0, -fwd.y); // -y means pointing down
-    const targetSpeed = THREE.MathUtils.clamp(
-      st.baseSpeed + pitchDown * st.speedGain + st.difficulty * 2,
-      st.baseSpeed * 0.6,
-      st.maxSpeed
-    );
-    st.speed = THREE.MathUtils.damp(st.speed, targetSpeed, 3.0, dt);
+    // Clamp max speed
+    const spd = st.vel.length();
+    if (spd > st.maxSpeed) st.vel.multiplyScalar(st.maxSpeed / spd);
 
-    // MOVE
-    const delta = fwd.clone().multiplyScalar(st.speed * dt);
-    st.playerPos.add(delta);
+    // Keep a tiny horizontal component so you never go perfectly vertical forever
+    const horiz = new THREE.Vector3(st.vel.x, 0, st.vel.z);
+    const horizLen = horiz.length();
+    if (horizLen < 3) {
+      // add small nudge in forward horizontal direction
+      const fwdHoriz = new THREE.Vector3(fwd.x, 0, fwd.z).normalize();
+      st.vel.addScaledVector(fwdHoriz, (3 - horizLen) * 0.6);
+    }
 
-    // CAMERA (third-person chase)
-    const camOffset = new THREE.Vector3(0, 1.8, 7.5); // behind and above
-    const camPos = camOffset.clone().applyQuaternion(st.playerQuat).add(st.playerPos);
-    cam.position.lerp(camPos, 0.25);
-    const lookAt = st.playerPos.clone().add(fwd.clone().multiplyScalar(12));
-    cam.lookAt(lookAt);
+    // Integrate
+    st.playerPos.addScaledVector(st.vel, dt);
 
-    // Update glider transform
+    // Camera (chase a bit behind + slightly above, relative to look direction)
+    const camOffLocal = new THREE.Vector3(0, 1.8, 7.5); // behind in local space
+    const camPos = camOffLocal.clone().applyQuaternion(st.playerQuat).add(st.playerPos);
+    cam.position.lerp(camPos, 0.2);
+    cam.lookAt(st.playerPos.clone().add(fwd.clone().multiplyScalar(14)));
+
+    // Glider transform
     glider.position.copy(st.playerPos);
     glider.quaternion.copy(st.playerQuat);
 
-    // COLLISIONS + PROXIMITY
-    const { nearestDist, nearestTag } = nearestCollider(st.playerPos, st.playerRadius, collidersRef.current);
+    // Collisions & proximity
+    const { nearestDist } = nearestCollider(st.playerPos, st.playerRadius, collidersRef.current);
+    if (nearestDist < 0) { doCrash(); return; }
 
-    // Crash if we overlap any collider
-    if (nearestDist < 0) {
-      doCrash();
-      return;
-    }
-
-    // Proximity scoring
-    const proxActive = nearestDist < stateRef.current.proxThreshold;
+    // scoring
+    const proxActive = nearestDist < st.proxThreshold;
     if (proxActive) {
-      st.proxTimer += dt;
-      st.proxDropTimer = 0;
-      // scale by closeness + speed
       const closeness = 1 - THREE.MathUtils.clamp(nearestDist / st.proxThreshold, 0, 1);
-      const gain = (5 + st.speed * 0.2) * st.multiplier * (0.25 + closeness * 1.25); // //! TUNE
+      const gain = (4 + spd * 0.18) * st.multiplier * (0.25 + closeness * 1.3);
       st.score += gain * dt;
-      // build multiplier over sustained proximity
-      if (st.proxTimer > 1.5 && st.multiplier < st.maxMultiplier) {
-        st.multiplier = Math.min(st.maxMultiplier, st.multiplier + 0.2 * dt * (1 + closeness * 2));
-      }
+      if (st.multiplier < st.maxMultiplier) st.multiplier = Math.min(st.maxMultiplier, st.multiplier + dt * (0.15 + closeness * 0.4));
     } else {
-      st.proxDropTimer += dt;
-      st.proxTimer = Math.max(0, st.proxTimer - dt * 0.5);
-      if (st.proxDropTimer > 0.8) {
-        st.multiplier = Math.max(1, st.multiplier - dt * 2.5);
-      }
+      st.multiplier = Math.max(1, st.multiplier - dt * 1.5);
     }
 
-    // PORTAL: If close to portal center and roughly aligned, transition
+    // Portal transition (ring lies mostly horizontal around Y axis near the bottom)
     if (portalMeshRef.current) {
       const portal = portalMeshRef.current;
-      const center = portal.userData.center; // Vector3
-      const ringR = portal.userData.ringR;
-      const thickness = portal.userData.thickness;
-      const d = st.playerPos.distanceTo(center);
-
-      // Require player to be near the ring and within a thin shell
-      if (Math.abs(d - ringR) < thickness * 0.6) {
-        // also require facing approximately toward -Z (continue forward)
+      const c = portal.userData.center; const ringR = portal.userData.ringR; const thick = portal.userData.thickness;
+      const dx = st.playerPos.x - c.x; const dz = st.playerPos.z - c.z; const dy = Math.abs(st.playerPos.y - c.y);
+      const radial = Math.sqrt(dx*dx + dz*dz);
+      if (Math.abs(radial - ringR) < thick * 0.7 && dy < thick * 0.9) {
         nextWorld();
       }
     }
 
-    // UI sync (throttle updates a bit if desired)
+    // UI sync
     setUI((u) => ({
       ...u,
       score: st.score,
       multiplier: st.multiplier,
-      speed: st.speed,
+      speed: spd,
       crashed: st.crashed,
       paused: st.paused,
       worldSeed: st.worldSeed,
@@ -381,11 +246,9 @@ export default function SuperflightCleanRoom() {
     }));
   };
 
-  // ------------- Collision helpers -------------
   function nearestCollider(playerPos, playerRadius, colliders) {
-    let min = Infinity;
-    let tag = null;
-    // simple broad-phase: only check within 120 units
+    let min = Infinity; let tag = null;
+    // simple broad-phase: we’ll just scan; the count is ~2–4k which is fine for a prototype
     for (let i = 0; i < colliders.length; i++) {
       const c = colliders[i];
       const d = playerPos.distanceTo(c.center) - (c.radius + playerRadius);
@@ -395,187 +258,168 @@ export default function SuperflightCleanRoom() {
     return { nearestDist: min, nearestTag: tag };
   }
 
-  // ------------- Crash / Restart / Pause -------------
+  // -------------------- Crash / Restart / Pause --------------------
   function doCrash() {
-    const st = stateRef.current;
-    st.crashed = true;
-    setUI((u) => ({ ...u, crashed: true, highScore: Math.max(u.highScore, st.score | 0) }));
+    const st = stateRef.current; st.crashed = true; setUI((u) => ({ ...u, crashed: true, highScore: Math.max(u.highScore, st.score | 0) }));
   }
-
   function restart() {
     const st = stateRef.current;
-    st.playerPos.set(0, 5, 10);
+    st.playerPos.set(0, st.mountainTopY + 40, 0);
     st.playerQuat.identity();
-    st.speed = st.baseSpeed;
-    st.score = 0;
-    st.multiplier = 1;
-    st.proxTimer = 0;
-    st.proxDropTimer = 0;
-    st.crashed = false;
-    // keep current world/seed
+    // tilt slightly nose-down to start
+    st.playerQuat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(20)));
+    st.vel.set(0, -20, -5);
+    st.score = 0; st.multiplier = 1; st.crashed = false;
   }
-
-  function togglePause() {
-    const st = stateRef.current;
-    st.paused = !st.paused;
-    setUI((u) => ({ ...u, paused: st.paused }));
-  }
-
+  function togglePause() { const st = stateRef.current; st.paused = !st.paused; setUI((u) => ({ ...u, paused: st.paused })); }
   function nextWorld() {
-    const st = stateRef.current;
-    st.worldSeed = (st.worldSeed * 1664525 + 1013904223) >>> 0; // LCG advance
-    st.difficulty += 1;
-    // carry momentum/speed/score; do not reset score or multiplier
-    const scene = sceneRef.current;
-    disposeWorld(worldGroupRef.current);
-    generateWorld(st.worldSeed, scene, worldGroupRef.current, collidersRef, portalMeshRef, st);
+    const st = stateRef.current; st.worldSeed = (st.worldSeed * 1664525 + 1013904223) >>> 0; st.difficulty += 1;
+    const scene = sceneRef.current; disposeWorld(worldGroupRef.current); generateMountainWorld(st.worldSeed, scene, worldGroupRef.current, collidersRef, portalMeshRef, st);
+    // keep momentum and score/mult; give a tiny upward trim to reset angle
+    st.playerPos.set(0, st.mountainTopY + 40, 0); st.playerQuat.identity(); st.playerQuat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(20))); st.vel.set(0, -22, -6);
   }
 
-  // ------------- World Generation -------------
-  function generateWorld(seed, scene, worldGroup, collidersRef, portalMeshRef, stOpt) {
+  // -------------------- World Generation: Mountain with Caves --------------------
+  function generateMountainWorld(seed, scene, worldGroup, collidersRef, portalMeshRef, st) {
     const rng = mulberry32(seed >>> 0);
     const theme = choose(rng, THEMES);
 
-    // Clear previous
-    worldGroup.clear();
-    collidersRef.current = [];
+    worldGroup.clear(); collidersRef.current = [];
+    if (scene && scene.fog) scene.fog.color.setHex(theme[3]);
 
-    // Sky fog color tweak per world
-    if (scene && scene.fog) {
-      scene.fog.color.setHex(theme[3]);
+    // Materials
+    const rockMat = new THREE.MeshStandardMaterial({ color: theme[0], roughness: 0.95, metalness: 0.02 });
+    const decoMat = new THREE.MeshStandardMaterial({ color: theme[1], roughness: 0.4, metalness: 0.0, emissive: new THREE.Color(theme[1]).multiplyScalar(0.2) });
+
+    // Mountain profile R(y)
+    const topY = st.mountainTopY, botY = st.mountainBottomY;
+    const height = topY - botY;
+    const baseR = 38 + randRange(rng, -4, 6);
+    const minR = 16 + randRange(rng, -2, 3);
+    const layers = Math.floor(height / 5); // vertical sampling
+
+    // Procedural tunnel params (3–5 sinuous shafts from top to bottom)
+    const tunnelCount = 3 + Math.floor(rng() * 3);
+    const tunnels = new Array(tunnelCount).fill(0).map((_, i) => ({
+      offX: randRange(rng, -8, 8), offZ: randRange(rng, -8, 8),
+      ax: randRange(rng, 6, 12), az: randRange(rng, 6, 12),
+      fx: randRange(rng, 0.006, 0.012), fz: randRange(rng, 0.006, 0.012),
+      phx: randRange(rng, 0, Math.PI * 2), phz: randRange(rng, 0, Math.PI * 2),
+      radius: randRange(rng, 3.5, 6.0),
+    }));
+
+    function tunnelCenterAtY(y, t) {
+      // smooth weaving in XZ with slight Y-coupling
+      const x = t.offX + Math.sin(y * t.fx + t.phx) * t.ax;
+      const z = t.offZ + Math.cos(y * t.fz + t.phz) * t.az;
+      return new THREE.Vector3(x, y, z);
     }
 
-    // Terrain materials
-    const rockMat = new THREE.MeshStandardMaterial({ color: theme[0], roughness: 0.9, metalness: 0.0 });
-    const decoMat = new THREE.MeshStandardMaterial({ color: theme[1], roughness: 0.5, metalness: 0.0, emissive: new THREE.Color(theme[1]).multiplyScalar(0.05) });
+    // Random “nibble” voids (caves not connected to tunnels)
+    const nibbleCount = 18;
+    const nibbles = [];
+    for (let i = 0; i < nibbleCount; i++) {
+      nibbles.push({
+        c: new THREE.Vector3(randRange(rng, -20, 20), randRange(rng, botY + 60, topY - 20), randRange(rng, -20, 20)),
+        r: randRange(rng, 3, 9),
+      });
+    }
 
-    // --- Spire fields ---
-    const spireCount = 60 + Math.floor((stOpt?.difficulty || 1) * 10); // //! TUNE density
-    for (let i = 0; i < spireCount; i++) {
-      const x = randRange(rng, -40, 40);
-      const z = randRange(rng, -1500, -100);
-      const baseY = randRange(rng, -5, 12);
-      const height = randRange(rng, 8, 28);
-      const radius = randRange(rng, 1.8, 4.5);
+    // Instanced rock shell
+    const rockGeo = new THREE.IcosahedronGeometry(1, 0);
+    const instances = [];
 
-      const g = new THREE.CylinderGeometry(radius * 0.8, radius, height, 6, 1);
-      const m = new THREE.Mesh(g, rockMat);
-      m.position.set(x, baseY + height * 0.5, z);
-      m.rotation.y = randRange(rng, 0, Math.PI * 2);
-      worldGroup.add(m);
+    for (let li = 0; li <= layers; li++) {
+      const y = topY - (li / layers) * height; // descending
+      const t = (y - botY) / height; // 0..1 bottom->top reversed, but fine
+      // Conical-ish with bumps
+      const rProfile = THREE.MathUtils.lerp(minR, baseR, Math.pow(t, 0.6)) + Math.sin(y * 0.07) * 2.4 + Math.cos(y * 0.021) * 1.6;
 
-      // Build stacked sphere colliders up the spire for coarse collision
-      const layers = Math.max(3, Math.floor(height / 4));
-      for (let j = 0; j < layers; j++) {
-        const cy = m.position.y - height * 0.5 + (j + 0.5) * (height / layers);
-        const r = radius * 0.75;
-        collidersRef.current.push(new SphereCollider(new THREE.Vector3(x, cy, z), r, "rock"));
+      const thickness = 5 + randRange(rng, -1.0, 1.5); // shell thickness
+      const ringLayers = 3; // number of radial shells at this Y
+
+      for (let rl = 0; rl < ringLayers; rl++) {
+        const r = Math.max(4, rProfile - rl * (thickness / ringLayers));
+        const circumference = 2 * Math.PI * r;
+        const spacing = 1.8 + rl * 0.4;
+        const count = Math.max(8, Math.floor(circumference / spacing));
+        for (let i = 0; i < count; i++) {
+          const ang = (i / count) * Math.PI * 2 + randRange(rng, -0.08, 0.08);
+          const jitter = randRange(rng, -0.9, 0.9);
+          const rad = Math.max(1, r + jitter);
+          const x = Math.cos(ang) * rad;
+          const z = Math.sin(ang) * rad;
+
+          const p = new THREE.Vector3(x, y + randRange(rng, -0.8, 0.8), z);
+
+          // Skip if inside any tunnel cylinder at this Y
+          let carve = false;
+          for (let k = 0; k < tunnels.length && !carve; k++) {
+            const c = tunnelCenterAtY(y, tunnels[k]);
+            const d = Math.hypot(p.x - c.x, p.z - c.z);
+            if (d < tunnels[k].radius + 1.2) carve = true;
+          }
+          // Skip if inside any nibble sphere
+          if (!carve) {
+            for (let k = 0; k < nibbles.length; k++) {
+              const nb = nibbles[k];
+              if (p.distanceTo(nb.c) < nb.r) { carve = true; break; }
+            }
+          }
+          if (carve) continue;
+
+          // Place a rock instance
+          const scale = randRange(rng, 0.9, 2.2);
+          const rotY = randRange(rng, 0, Math.PI * 2);
+          instances.push({ p, s: scale, ry: rotY });
+        }
       }
     }
 
-    // --- Arches (decor + mild collision via spheres) ---
-    const archCount = 10 + Math.floor((stOpt?.difficulty || 1) * 2);
-    for (let a = 0; a < archCount; a++) {
-      const center = new THREE.Vector3(randRange(rng, -30, 30), randRange(rng, 2, 18), randRange(rng, -1300, -200));
-      const radius = randRange(rng, 6, 12);
-      const tube = 1.2;
-      const torus = new THREE.TorusGeometry(radius, tube, 8, 24);
-      const mesh = new THREE.Mesh(torus, rockMat);
-      mesh.position.copy(center);
-      mesh.rotation.x = randRange(rng, 0, Math.PI);
-      mesh.rotation.y = randRange(rng, 0, Math.PI);
-      worldGroup.add(mesh);
+    // Build InstancedMesh
+    const mesh = new THREE.InstancedMesh(rockGeo, rockMat, instances.length);
+    const m4 = new THREE.Matrix4(); const q = new THREE.Quaternion(); const v3 = new THREE.Vector3();
+    instances.forEach((it, i) => {
+      q.setFromAxisAngle(new THREE.Vector3(0,1,0), it.ry);
+      m4.compose(it.p, q, v3.setScalar(it.s));
+      mesh.setMatrixAt(i, m4);
+      // collider sphere (coarse)
+      collidersRef.current.push(new SphereCollider(it.p.clone(), it.s * 0.92, "rock"));
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    worldGroup.add(mesh);
 
-      // collider ring as spaced spheres around the circle (coarse!)
-      const ringCount = 16;
-      for (let k = 0; k < ringCount; k++) {
-        const ang = (k / ringCount) * Math.PI * 2;
-        const px = center.x + Math.cos(ang) * radius;
-        const py = center.y + Math.sin(ang) * radius;
-        const pz = center.z;
-        collidersRef.current.push(new SphereCollider(new THREE.Vector3(px, py, pz), tube * 0.9, "rock"));
-      }
-    }
-
-    // --- Cave tunnel (visual)
-    const pathPts = [];
-    const segs = 18;
-    let zCursor = -50;
-    let cx = 0, cy = 6;
-    for (let i = 0; i < segs; i++) {
-      cx += randRange(rng, -10, 10);
-      cy += randRange(rng, -2.5, 2.5);
-      zCursor -= randRange(rng, 50, 110);
-      pathPts.push(new THREE.Vector3(cx, cy, zCursor));
-    }
-    const curve = new THREE.CatmullRomCurve3(pathPts);
-    const caveRadius = 6 + randRange(rng, -1.0, 2.0);
-    const caveGeom = new THREE.TubeGeometry(curve, 180, caveRadius, 14, false);
-    // Render inside of tube for a cave feel
-    const caveMat = new THREE.MeshStandardMaterial({ color: theme[0], roughness: 0.95, metalness: 0.0, side: THREE.BackSide });
-    const caveMesh = new THREE.Mesh(caveGeom, caveMat);
-    worldGroup.add(caveMesh);
-
-    // (Optional) sparse boulders near cave exit for proximity fun
-    for (let i = 0; i < 24; i++) {
-      const t = rng();
-      const p = curve.getPoint(t);
-      const off = new THREE.Vector3(randRange(rng, -caveRadius * 0.8, caveRadius * 0.8), randRange(rng, -caveRadius * 0.8, caveRadius * 0.8), randRange(rng, -caveRadius * 0.8, caveRadius * 0.8));
-      const pos = p.clone().add(off);
-      const r = randRange(rng, 0.8, 2.2);
-      const g = new THREE.IcosahedronGeometry(r, 0);
-      const m = new THREE.Mesh(g, rockMat);
-      m.position.copy(pos);
-      worldGroup.add(m);
-      collidersRef.current.push(new SphereCollider(pos.clone(), r * 0.9, "rock"));
-    }
-
-    // --- Portal ---
-    const portalZ = -1500 - randRange(rng, 0, 400);
-    const portalCenter = new THREE.Vector3(randRange(rng, -8, 8), randRange(rng, 3, 12), portalZ);
-    const ringR = 7.5;
-    const ringThickness = 1.2;
-    const portalGeo = new THREE.TorusGeometry(ringR, ringThickness, 16, 36);
-    const portalMat = new THREE.MeshStandardMaterial({ color: theme[1], emissive: new THREE.Color(theme[1]).multiplyScalar(0.35), roughness: 0.2, metalness: 0.0 });
-    const portalMesh = new THREE.Mesh(portalGeo, portalMat);
-    portalMesh.position.copy(portalCenter);
-    portalMesh.rotation.x = Math.PI / 2; // face toward +Z/-Z
-    portalMesh.userData.center = portalCenter;
-    portalMesh.userData.ringR = ringR;
-    portalMesh.userData.thickness = ringThickness;
-    worldGroup.add(portalMesh);
-    portalMeshRef.current = portalMesh;
-
-    // Also add a mild collider "shell" so you cannot clip through the ring geometry itself
-    collidersRef.current.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(ringR, 0, 0)), ringThickness * 0.9, "portal"));
-    collidersRef.current.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(-ringR, 0, 0)), ringThickness * 0.9, "portal"));
-    collidersRef.current.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(0, ringR, 0)), ringThickness * 0.9, "portal"));
-    collidersRef.current.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(0, -ringR, 0)), ringThickness * 0.9, "portal"));
-
-    // Subtle dust/particles near portal for vibe
-    const dust = buildDustField(theme[1]);
-    dust.position.copy(portalCenter);
+    // Decorative falling dust inside mountain (light performance impact)
+    const dust = buildDustField(theme[1], 1200);
     worldGroup.add(dust);
 
-    // Decorative horizon dots (stars-ish)
-    const stars = buildStars(theme[2], theme[3]);
-    worldGroup.add(stars);
+    // Portal near the bottom in a cleared area
+    const portalY = botY + 40;
+    const portalCenter = new THREE.Vector3(0, portalY, 0);
+    const ringR = 9.0; const ringThickness = 1.7;
+    const portalGeo = new THREE.TorusGeometry(ringR, ringThickness, 16, 40);
+    const portalMat = new THREE.MeshStandardMaterial({ color: theme[1], emissive: new THREE.Color(theme[1]).multiplyScalar(0.5), roughness: 0.25 });
+    const portalMesh = new THREE.Mesh(portalGeo, portalMat);
+    portalMesh.position.copy(portalCenter);
+    portalMesh.rotation.x = 0; // lies flat-ish (normal is +Y)
+    portalMesh.userData.center = portalCenter; portalMesh.userData.ringR = ringR; portalMesh.userData.thickness = ringThickness;
+    worldGroup.add(portalMesh); portalMeshRef.current = portalMesh;
+
+    // Tiny collider pearls around ring so you don't clip the torus body
+    collidersRef.current.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(ringR, 0, 0)), ringThickness * 0.95, "portal"));
+    collidersRef.current.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(-ringR, 0, 0)), ringThickness * 0.95, "portal"));
+    collidersRef.current.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(0, 0, ringR)), ringThickness * 0.95, "portal"));
+    collidersRef.current.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(0, 0, -ringR)), ringThickness * 0.95, "portal"));
+
+    // Stars/background
+    const stars = buildStars(theme[2], theme[3]); worldGroup.add(stars);
   }
 
   function disposeWorld(group) {
-    if (!group) return;
-    group.traverse((obj) => {
-      if (obj.isMesh) {
-        obj.geometry?.dispose?.();
-        if (obj.material?.isMaterial) {
-          obj.material.dispose?.();
-        }
-      }
-    });
-    group.clear();
+    if (!group) return; group.traverse((obj) => { if (obj.isMesh) { obj.geometry?.dispose?.(); obj.material?.dispose?.(); } }); group.clear();
   }
 
-  // ------------- Mesh Builders -------------
+  // -------------------- Mesh Builders --------------------
   function buildGliderMesh() {
     const g = new THREE.Group();
     const bodyGeo = new THREE.ConeGeometry(0.5, 1.8, 6);
@@ -583,55 +427,33 @@ export default function SuperflightCleanRoom() {
     const tailGeo = new THREE.BoxGeometry(0.9, 0.06, 0.5);
     const matBody = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, metalness: 0.1 });
     const matWing = new THREE.MeshStandardMaterial({ color: 0x87ceeb, roughness: 0.6, metalness: 0.0 });
-
-    const body = new THREE.Mesh(bodyGeo, matBody);
-    body.rotation.x = Math.PI / 2;
-    g.add(body);
-
-    const wing = new THREE.Mesh(wingGeo, matWing);
-    wing.position.set(0, 0, -0.1);
-    g.add(wing);
-
-    const tail = new THREE.Mesh(tailGeo, matWing);
-    tail.position.set(0, -0.2, 0.4);
-    tail.rotation.z = THREE.MathUtils.degToRad(15);
-    g.add(tail);
-
+    const body = new THREE.Mesh(bodyGeo, matBody); body.rotation.x = Math.PI / 2; g.add(body);
+    const wing = new THREE.Mesh(wingGeo, matWing); wing.position.set(0, 0, -0.1); g.add(wing);
+    const tail = new THREE.Mesh(tailGeo, matWing); tail.position.set(0, -0.2, 0.4); tail.rotation.z = THREE.MathUtils.degToRad(15); g.add(tail);
     return g;
   }
 
-  function buildDustField(colorHex) {
-    const count = 400;
-    const geo = new THREE.BufferGeometry();
-    const positions = new Float32Array(count * 3);
+  function buildDustField(colorHex, count = 800) {
+    const geo = new THREE.BufferGeometry(); const positions = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
-      positions[i * 3 + 0] = (Math.random() - 0.5) * 25;
-      positions[i * 3 + 1] = (Math.random() - 0.5) * 25;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 25;
+      positions[i * 3 + 0] = (Math.random() - 0.5) * 80;
+      positions[i * 3 + 1] = (Math.random() - 0.5) * 120;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 80;
     }
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    const mat = new THREE.PointsMaterial({ color: colorHex, size: 0.06, transparent: true, opacity: 0.8 });
-    return new THREE.Points(geo, mat);
+    const mat = new THREE.PointsMaterial({ color: colorHex, size: 0.06, transparent: true, opacity: 0.55 });
+    const pts = new THREE.Points(geo, mat); pts.position.set(0, (stateRef.current.mountainTopY + stateRef.current.mountainBottomY)/2, 0); return pts;
   }
 
   function buildStars(colorTop, colorBottom) {
-    const count = 800;
-    const geo = new THREE.BufferGeometry();
-    const positions = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      const r = 600 + Math.random() * 400;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.random() * Math.PI;
-      positions[i * 3 + 0] = r * Math.sin(phi) * Math.cos(theta);
-      positions[i * 3 + 1] = r * Math.cos(phi);
-      positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
-    }
+    const count = 900; const geo = new THREE.BufferGeometry(); const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) { const r = 900 + Math.random() * 700; const th = Math.random() * Math.PI * 2; const ph = Math.random() * Math.PI; positions[i*3+0] = r * Math.sin(ph) * Math.cos(th); positions[i*3+1] = r * Math.cos(ph); positions[i*3+2] = r * Math.sin(ph) * Math.sin(th); }
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     const mat = new THREE.PointsMaterial({ color: colorTop, size: 0.8, transparent: true, opacity: 0.35 });
     return new THREE.Points(geo, mat);
   }
 
-  // ------------- Render -------------
+  // -------------------- Render --------------------
   return (
     <div className="w-full h-[80vh] relative select-none">
       <div ref={mountRef} className="absolute inset-0 bg-gradient-to-b from-slate-800 to-slate-900 rounded-2xl overflow-hidden" />
@@ -654,10 +476,10 @@ export default function SuperflightCleanRoom() {
       {/* Help / status */}
       <div className="absolute right-2 top-2 p-2 rounded-xl bg-black/30 text-white text-xs max-w-[260px]">
         <div className="font-semibold">Controls</div>
-        <div>Mouse: pitch + yaw</div>
-        <div>W/S: pitch · A/D: roll</div>
-        <div>Q/E: yaw · P: pause</div>
-        <div>R: restart after crash</div>
+        <div>W/S: pitch up/down</div>
+        <div>A/D: yaw left/right</div>
+        <div>Q/E: roll (barrel)</div>
+        <div>P: pause · R: restart</div>
       </div>
 
       {/* Crash Overlay */}
@@ -681,9 +503,8 @@ export default function SuperflightCleanRoom() {
         </div>
       )}
 
-      {/* Footer tip */}
       <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-white text-[11px] opacity-70 bg-black/30 px-2 py-1 rounded-full">
-        Superflight (clean-room) · Procedural worlds · Fly dangerously for more points
+        Superflight (clean-room) · Downhill gliding through a carved mountain · Keyboard only
       </div>
     </div>
   );

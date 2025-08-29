@@ -4,19 +4,13 @@ import * as THREE from "three";
 /**
  * Superflight (clean-room) — Downhill Wingsuit (WebGL)
  * ---------------------------------------------------
- * Implements a downhill GLIDE (not forward rail) with keyboard-only controls,
- * and a single massive "mountain" made of instanced rocks with carved tunnels.
- *
- * What changed vs previous prototype
- * - Flight is gravity + glide thrust along forward; you always descend overall
- * - Keyboard-only: W/S=pitch, A/D=yaw (turn), Q/E=barrel roll
- * - Big noise-y mountain built from thousands of instanced boulders; holes are
- *   carved by skipping rock placement along procedural tunnel paths + random
- *   “nibbles.”
- * - Portal sits deep below to transition to a fresh mountain.
+ * Update:
+ *  - Keyboard-only + Arrow keys (W/S/A/D + ↑/↓/←/→) and Q/E barrel roll
+ *  - New blocky, layered canyon/mountain generator with carved tunnels & caves
+ *  - Stronger haze/fog for depth; portal at the bottom to roll a new seed
  */
 
-// -------------------- Utility: seeded RNG --------------------
+// -------------------- Utility --------------------
 function mulberry32(seed) {
   let t = seed >>> 0;
   return function () {
@@ -26,18 +20,25 @@ function mulberry32(seed) {
     return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
   };
 }
-
-function randRange(rng, min, max) { return min + (max - min) * rng(); }
-function choose(rng, arr) { return arr[Math.floor(rng() * arr.length)]; }
+const randRange = (rng, min, max) => min + (max - min) * rng();
+const choose = (rng, arr) => arr[Math.floor(rng() * arr.length)];
 
 // -------------------- Color Palettes --------------------
+// [terrainBase, accent/portal, skyTop, skyBottom]
 const THEMES = [
-  [0x5c715e, 0xffcc66, 0x3a4d73, 0x87b7e6],
-  [0x6c5b7b, 0xf67280, 0x2a2b4a, 0x7a85a3],
-  [0x3a7d44, 0xfaf3dd, 0x274060, 0x97c1e7],
-  [0x8e5a33, 0xf2d492, 0x3c3e44, 0x99b2c6],
-  [0x3d405b, 0xe07a5f, 0x16222a, 0x3a6073],
+  [0x8e5a33, 0xbf5af2, 0x2e253f, 0xdcd7c9], // warm canyon + purple accents
+  [0x6c5b7b, 0xf67280, 0x2a2b4a, 0x9fb3c8],
+  [0x3d405b, 0xe07a5f, 0x1a1e26, 0x5b728a],
 ];
+
+// Simple per-instance color banding by height (strata look)
+function strataColor(y, topY, botY, baseHex) {
+  const base = new THREE.Color(baseHex);
+  const band = Math.floor((topY - y) / 10) % 2; // 10u thick bands
+  const shade = band ? 0.8 : 1.05; // alternate slightly
+  base.multiplyScalar(shade);
+  return base;
+}
 
 class SphereCollider { constructor(center, radius, tag = "rock") { this.center = center; this.radius = radius; this.tag = tag; } }
 
@@ -54,21 +55,18 @@ export default function SuperflightCleanRoom() {
 
   const [ui, setUI] = useState({ score: 0, multiplier: 1, speed: 0, crashed: false, paused: false, worldSeed: 1, highScore: 0, difficulty: 1 });
 
-  // Input
   const inputsRef = useRef({ keyW: false, keyS: false, keyA: false, keyD: false, keyQ: false, keyE: false });
 
-  // Physics / game state
   const stateRef = useRef({
     playerPos: new THREE.Vector3(0, 180, 0),
     playerQuat: new THREE.Quaternion(),
-    playerRadius: 0.9,
+    playerRadius: 1.0,
+    vel: new THREE.Vector3(0, -22, -6),
 
-    vel: new THREE.Vector3(0, -20, -5), // initial down-forward
-
-    gravity: 22,           // //! TUNE (units/s^2)
-    glideAccel: 40,        // thrust along forward based on pitch-down
-    drag: 0.65,            // linear drag
-    maxSpeed: 120,
+    gravity: 22,
+    glideAccel: 44,
+    drag: 0.62,
+    maxSpeed: 130,
 
     yawRate: THREE.MathUtils.degToRad(85),
     pitchRate: THREE.MathUtils.degToRad(70),
@@ -77,7 +75,7 @@ export default function SuperflightCleanRoom() {
     score: 0,
     multiplier: 1,
     maxMultiplier: 12,
-    proxThreshold: 5.5,
+    proxThreshold: 6.0,
 
     crashed: false,
     paused: false,
@@ -95,14 +93,14 @@ export default function SuperflightCleanRoom() {
     sceneRef.current = scene;
 
     const theme = THEMES[0];
-    scene.fog = new THREE.Fog(new THREE.Color(theme[3]), 80, 1800);
+    scene.fog = new THREE.Fog(new THREE.Color(theme[3]), 50, 1700);
 
-    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 4000);
-    camera.position.set(0, 185, 15);
+    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 5000);
+    camera.position.set(0, 185, 16);
     cameraRef.current = camera;
 
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0); hemi.position.set(0, 200, 0); scene.add(hemi);
-    const dir = new THREE.DirectionalLight(0xffffff, 0.9); dir.position.set(-50, 120, 10); scene.add(dir);
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.05); hemi.position.set(0, 200, 0); scene.add(hemi);
+    const dir = new THREE.DirectionalLight(0xffffff, 0.85); dir.position.set(-70, 140, 30); scene.add(dir);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -120,12 +118,20 @@ export default function SuperflightCleanRoom() {
     const onKey = (e, down) => {
       const i = inputsRef.current;
       switch (e.code) {
+        // WASD
         case "KeyW": i.keyW = down; break;
         case "KeyS": i.keyS = down; break;
         case "KeyA": i.keyA = down; break;
         case "KeyD": i.keyD = down; break;
+        // Arrows (mirror WASD)
+        case "ArrowUp": i.keyW = down; break;
+        case "ArrowDown": i.keyS = down; break;
+        case "ArrowLeft": i.keyA = down; break;
+        case "ArrowRight": i.keyD = down; break;
+        // Roll
         case "KeyQ": i.keyQ = down; break;
         case "KeyE": i.keyE = down; break;
+        // System
         case "KeyR": if (down) restart(); break;
         case "KeyP": if (down) togglePause(); break;
         default: break;
@@ -156,10 +162,10 @@ export default function SuperflightCleanRoom() {
   const tick = (dt) => {
     const st = stateRef.current; const cam = cameraRef.current; const glider = gliderRef.current; if (!cam || !glider) return; if (st.paused || st.crashed) return;
 
-    // Orientation from keyboard only
+    // Orientation: keyboard only (W/S pitch, A/D yaw, Q/E roll)
     const inp = inputsRef.current;
     const yaw = ((inp.keyD ? 1 : 0) - (inp.keyA ? 1 : 0)) * st.yawRate * dt;
-    const pitch = ((inp.keyS ? 1 : 0) - (inp.keyW ? 1 : 0)) * st.pitchRate * dt; // S = nose down, W = nose up (intuitive)
+    const pitch = ((inp.keyS ? 1 : 0) - (inp.keyW ? 1 : 0)) * st.pitchRate * dt;
     const roll = ((inp.keyE ? 1 : 0) - (inp.keyQ ? 1 : 0)) * st.rollRate * dt;
 
     const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), yaw);
@@ -167,88 +173,68 @@ export default function SuperflightCleanRoom() {
     const qRoll = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), -roll);
     st.playerQuat.multiply(qYaw).multiply(qPitch).multiply(qRoll).normalize();
 
-    // Forward vector from orientation
+    // Forward vector & physics
     const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(st.playerQuat).normalize();
-
-    // Physics: gravity + glide thrust + drag
-    const pitchDown = Math.max(0, -fwd.y); // 0..1 (nose straight down)
-    const thrust = (0.25 + pitchDown) * st.glideAccel; // more thrust when steeper
-    st.vel.addScaledVector(new THREE.Vector3(0,-1,0), st.gravity * dt); // gravity
-    st.vel.addScaledVector(fwd, thrust * dt); // glide thrust
+    const pitchDown = Math.max(0, -fwd.y);
+    const thrust = (0.25 + pitchDown) * st.glideAccel;
+    st.vel.addScaledVector(new THREE.Vector3(0,-1,0), st.gravity * dt);
+    st.vel.addScaledVector(fwd, thrust * dt);
 
     // Drag
     const drag = 1 - Math.exp(-st.drag * dt);
     st.vel.multiplyScalar(1 - drag);
 
-    // Clamp max speed
+    // Clamp
     const spd = st.vel.length();
     if (spd > st.maxSpeed) st.vel.multiplyScalar(st.maxSpeed / spd);
 
-    // Keep a tiny horizontal component so you never go perfectly vertical forever
-    const horiz = new THREE.Vector3(st.vel.x, 0, st.vel.z);
-    const horizLen = horiz.length();
-    if (horizLen < 3) {
-      // add small nudge in forward horizontal direction
-      const fwdHoriz = new THREE.Vector3(fwd.x, 0, fwd.z).normalize();
-      st.vel.addScaledVector(fwdHoriz, (3 - horizLen) * 0.6);
+    // Keep slight horizontal component
+    const horiz = new THREE.Vector3(st.vel.x, 0, st.vel.z); const hlen = horiz.length();
+    if (hlen < 3) {
+      const fH = new THREE.Vector3(fwd.x, 0, fwd.z).normalize();
+      st.vel.addScaledVector(fH, (3 - hlen) * 0.6);
     }
 
     // Integrate
     st.playerPos.addScaledVector(st.vel, dt);
 
-    // Camera (chase a bit behind + slightly above, relative to look direction)
-    const camOffLocal = new THREE.Vector3(0, 1.8, 7.5); // behind in local space
+    // Camera chase
+    const camOffLocal = new THREE.Vector3(0, 1.9, 8.0);
     const camPos = camOffLocal.clone().applyQuaternion(st.playerQuat).add(st.playerPos);
     cam.position.lerp(camPos, 0.2);
-    cam.lookAt(st.playerPos.clone().add(fwd.clone().multiplyScalar(14)));
+    cam.lookAt(st.playerPos.clone().add(fwd.clone().multiplyScalar(16)));
 
     // Glider transform
-    glider.position.copy(st.playerPos);
-    glider.quaternion.copy(st.playerQuat);
+    glider.position.copy(st.playerPos); glider.quaternion.copy(st.playerQuat);
 
     // Collisions & proximity
     const { nearestDist } = nearestCollider(st.playerPos, st.playerRadius, collidersRef.current);
     if (nearestDist < 0) { doCrash(); return; }
 
-    // scoring
     const proxActive = nearestDist < st.proxThreshold;
     if (proxActive) {
       const closeness = 1 - THREE.MathUtils.clamp(nearestDist / st.proxThreshold, 0, 1);
-      const gain = (4 + spd * 0.18) * st.multiplier * (0.25 + closeness * 1.3);
+      const gain = (5 + spd * 0.18) * st.multiplier * (0.25 + closeness * 1.3);
       st.score += gain * dt;
-      if (st.multiplier < st.maxMultiplier) st.multiplier = Math.min(st.maxMultiplier, st.multiplier + dt * (0.15 + closeness * 0.4));
+      if (st.multiplier < st.maxMultiplier) st.multiplier = Math.min(st.maxMultiplier, st.multiplier + dt * (0.15 + closeness * 0.45));
     } else {
       st.multiplier = Math.max(1, st.multiplier - dt * 1.5);
     }
 
-    // Portal transition (ring lies mostly horizontal around Y axis near the bottom)
+    // Portal
     if (portalMeshRef.current) {
-      const portal = portalMeshRef.current;
-      const c = portal.userData.center; const ringR = portal.userData.ringR; const thick = portal.userData.thickness;
+      const portal = portalMeshRef.current; const c = portal.userData.center; const ringR = portal.userData.ringR; const thick = portal.userData.thickness;
       const dx = st.playerPos.x - c.x; const dz = st.playerPos.z - c.z; const dy = Math.abs(st.playerPos.y - c.y);
       const radial = Math.sqrt(dx*dx + dz*dz);
-      if (Math.abs(radial - ringR) < thick * 0.7 && dy < thick * 0.9) {
-        nextWorld();
-      }
+      if (Math.abs(radial - ringR) < thick * 0.7 && dy < thick * 0.9) nextWorld();
     }
 
-    // UI sync
-    setUI((u) => ({
-      ...u,
-      score: st.score,
-      multiplier: st.multiplier,
-      speed: spd,
-      crashed: st.crashed,
-      paused: st.paused,
-      worldSeed: st.worldSeed,
-      difficulty: st.difficulty,
-      highScore: Math.max(u.highScore, st.score | 0),
-    }));
+    // UI
+    setUI((u) => ({ ...u, score: st.score, multiplier: st.multiplier, speed: spd, crashed: st.crashed, paused: st.paused, worldSeed: st.worldSeed, difficulty: st.difficulty, highScore: Math.max(u.highScore, st.score | 0) }));
   };
 
   function nearestCollider(playerPos, playerRadius, colliders) {
     let min = Infinity; let tag = null;
-    // simple broad-phase: we’ll just scan; the count is ~2–4k which is fine for a prototype
     for (let i = 0; i < colliders.length; i++) {
       const c = colliders[i];
       const d = playerPos.distanceTo(c.center) - (c.radius + playerRadius);
@@ -259,27 +245,23 @@ export default function SuperflightCleanRoom() {
   }
 
   // -------------------- Crash / Restart / Pause --------------------
-  function doCrash() {
-    const st = stateRef.current; st.crashed = true; setUI((u) => ({ ...u, crashed: true, highScore: Math.max(u.highScore, st.score | 0) }));
-  }
+  function doCrash() { const st = stateRef.current; st.crashed = true; setUI((u) => ({ ...u, crashed: true, highScore: Math.max(u.highScore, st.score | 0) })); }
   function restart() {
     const st = stateRef.current;
     st.playerPos.set(0, st.mountainTopY + 40, 0);
     st.playerQuat.identity();
-    // tilt slightly nose-down to start
     st.playerQuat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(20)));
-    st.vel.set(0, -20, -5);
+    st.vel.set(0, -22, -6);
     st.score = 0; st.multiplier = 1; st.crashed = false;
   }
   function togglePause() { const st = stateRef.current; st.paused = !st.paused; setUI((u) => ({ ...u, paused: st.paused })); }
   function nextWorld() {
     const st = stateRef.current; st.worldSeed = (st.worldSeed * 1664525 + 1013904223) >>> 0; st.difficulty += 1;
     const scene = sceneRef.current; disposeWorld(worldGroupRef.current); generateMountainWorld(st.worldSeed, scene, worldGroupRef.current, collidersRef, portalMeshRef, st);
-    // keep momentum and score/mult; give a tiny upward trim to reset angle
     st.playerPos.set(0, st.mountainTopY + 40, 0); st.playerQuat.identity(); st.playerQuat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(20))); st.vel.set(0, -22, -6);
   }
 
-  // -------------------- World Generation: Mountain with Caves --------------------
+  // -------------------- World Generation: Blocky Canyon Mountain --------------------
   function generateMountainWorld(seed, scene, worldGroup, collidersRef, portalMeshRef, st) {
     const rng = mulberry32(seed >>> 0);
     const theme = choose(rng, THEMES);
@@ -288,78 +270,64 @@ export default function SuperflightCleanRoom() {
     if (scene && scene.fog) scene.fog.color.setHex(theme[3]);
 
     // Materials
-    const rockMat = new THREE.MeshStandardMaterial({ color: theme[0], roughness: 0.95, metalness: 0.02 });
-    const decoMat = new THREE.MeshStandardMaterial({ color: theme[1], roughness: 0.4, metalness: 0.0, emissive: new THREE.Color(theme[1]).multiplyScalar(0.2) });
+    const rockMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95, metalness: 0.02, vertexColors: true });
+    const portalMat = new THREE.MeshStandardMaterial({ color: theme[1], emissive: new THREE.Color(theme[1]).multiplyScalar(0.5), roughness: 0.25 });
 
-    // Mountain profile R(y)
-    const topY = st.mountainTopY, botY = st.mountainBottomY;
-    const height = topY - botY;
-    const baseR = 38 + randRange(rng, -4, 6);
-    const minR = 16 + randRange(rng, -2, 3);
-    const layers = Math.floor(height / 5); // vertical sampling
+    const topY = st.mountainTopY, botY = st.mountainBottomY; const height = topY - botY;
 
-    // Procedural tunnel params (3–5 sinuous shafts from top to bottom)
+    // Base radius curve (mountain silhouette)
+    const baseR = 42 + randRange(rng, -6, 8);
+    const minR = 18 + randRange(rng, -3, 3);
+    function radiusAtY(y) {
+      const t = (y - botY) / height; // 0..1 bottom->top
+      const r = THREE.MathUtils.lerp(minR, baseR, Math.pow(t, 0.55));
+      // add soft wobble to create alcoves
+      return r + Math.sin(y * 0.06) * 2.2 + Math.cos(y * 0.017 + 1.7) * 1.8;
+    }
+
+    // Tunnels (3–5 weaving shafts)
     const tunnelCount = 3 + Math.floor(rng() * 3);
-    const tunnels = new Array(tunnelCount).fill(0).map((_, i) => ({
-      offX: randRange(rng, -8, 8), offZ: randRange(rng, -8, 8),
-      ax: randRange(rng, 6, 12), az: randRange(rng, 6, 12),
-      fx: randRange(rng, 0.006, 0.012), fz: randRange(rng, 0.006, 0.012),
-      phx: randRange(rng, 0, Math.PI * 2), phz: randRange(rng, 0, Math.PI * 2),
-      radius: randRange(rng, 3.5, 6.0),
+    const tunnels = new Array(tunnelCount).fill(0).map(() => ({
+      offX: randRange(rng, -8, 8), offZ: randRange(rng, -8, 8), ax: randRange(rng, 6, 12), az: randRange(rng, 6, 12), fx: randRange(rng, 0.006, 0.012), fz: randRange(rng, 0.006, 0.012), phx: randRange(rng, 0, Math.PI * 2), phz: randRange(rng, 0, Math.PI * 2), radius: randRange(rng, 3.5, 6.2),
     }));
+    const tunnelCenterAtY = (y, t) => new THREE.Vector3(t.offX + Math.sin(y * t.fx + t.phx) * t.ax, y, t.offZ + Math.cos(y * t.fz + t.phz) * t.az);
 
-    function tunnelCenterAtY(y, t) {
-      // smooth weaving in XZ with slight Y-coupling
-      const x = t.offX + Math.sin(y * t.fx + t.phx) * t.ax;
-      const z = t.offZ + Math.cos(y * t.fz + t.phz) * t.az;
-      return new THREE.Vector3(x, y, z);
-    }
+    // Random spherical caves (nibbles)
+    const nibbles = Array.from({ length: 20 }, () => ({ c: new THREE.Vector3(randRange(rng, -20, 20), randRange(rng, botY + 80, topY - 20), randRange(rng, -20, 20)), r: randRange(rng, 3, 10) }));
 
-    // Random “nibble” voids (caves not connected to tunnels)
-    const nibbleCount = 18;
-    const nibbles = [];
-    for (let i = 0; i < nibbleCount; i++) {
-      nibbles.push({
-        c: new THREE.Vector3(randRange(rng, -20, 20), randRange(rng, botY + 60, topY - 20), randRange(rng, -20, 20)),
-        r: randRange(rng, 3, 9),
-      });
-    }
-
-    // Instanced rock shell
-    const rockGeo = new THREE.IcosahedronGeometry(1, 0);
+    // Build layered ring slabs using InstancedMesh of boxes
+    const boxGeo = new THREE.BoxGeometry(1, 1, 1);
     const instances = [];
 
-    for (let li = 0; li <= layers; li++) {
-      const y = topY - (li / layers) * height; // descending
-      const t = (y - botY) / height; // 0..1 bottom->top reversed, but fine
-      // Conical-ish with bumps
-      const rProfile = THREE.MathUtils.lerp(minR, baseR, Math.pow(t, 0.6)) + Math.sin(y * 0.07) * 2.4 + Math.cos(y * 0.021) * 1.6;
+    const layerStep = 12;            // vertical distance between strata (bigger => fewer layers)
+    const shellStep = 2.6;           // radial shell spacing
+    const tangentialSpacing = 9;     // arc length per box target
 
-      const thickness = 5 + randRange(rng, -1.0, 1.5); // shell thickness
-      const ringLayers = 3; // number of radial shells at this Y
+    for (let y = topY; y >= botY; y -= layerStep) {
+      const rProfile = Math.max(5, radiusAtY(y));
+      const ringLayers = 1 + Math.floor(randRange(rng, 0, 1.2)); // 1..2 shells occasionally
 
       for (let rl = 0; rl < ringLayers; rl++) {
-        const r = Math.max(4, rProfile - rl * (thickness / ringLayers));
+        const r = Math.max(4, rProfile - rl * shellStep);
         const circumference = 2 * Math.PI * r;
-        const spacing = 1.8 + rl * 0.4;
-        const count = Math.max(8, Math.floor(circumference / spacing));
+        const count = THREE.MathUtils.clamp(Math.floor(circumference / tangentialSpacing), 22, 60);
+
         for (let i = 0; i < count; i++) {
-          const ang = (i / count) * Math.PI * 2 + randRange(rng, -0.08, 0.08);
-          const jitter = randRange(rng, -0.9, 0.9);
-          const rad = Math.max(1, r + jitter);
-          const x = Math.cos(ang) * rad;
-          const z = Math.sin(ang) * rad;
+          // Skip with some randomness to form gaps + carving checks
+          if (rng() < 0.1) continue;
+          const ang = (i / count) * Math.PI * 2 + randRange(rng, -0.05, 0.05);
+          const radJitter = randRange(rng, -0.9, 0.9);
+          const x = Math.cos(ang) * (r + radJitter);
+          const z = Math.sin(ang) * (r + radJitter);
+          const p = new THREE.Vector3(x, y + randRange(rng, -1.0, 1.0), z);
 
-          const p = new THREE.Vector3(x, y + randRange(rng, -0.8, 0.8), z);
-
-          // Skip if inside any tunnel cylinder at this Y
+          // Carve if in tunnels or caves
           let carve = false;
           for (let k = 0; k < tunnels.length && !carve; k++) {
             const c = tunnelCenterAtY(y, tunnels[k]);
             const d = Math.hypot(p.x - c.x, p.z - c.z);
-            if (d < tunnels[k].radius + 1.2) carve = true;
+            if (d < tunnels[k].radius + 1.6) carve = true;
           }
-          // Skip if inside any nibble sphere
           if (!carve) {
             for (let k = 0; k < nibbles.length; k++) {
               const nb = nibbles[k];
@@ -368,56 +336,77 @@ export default function SuperflightCleanRoom() {
           }
           if (carve) continue;
 
-          // Place a rock instance
-          const scale = randRange(rng, 0.9, 2.2);
-          const rotY = randRange(rng, 0, Math.PI * 2);
-          instances.push({ p, s: scale, ry: rotY });
+          // Box dimensions (tangent width, vertical height, radial depth)
+          const width = randRange(rng, 2.2, 5.4);
+          const heightBox = randRange(rng, 1.2, 2.8);
+          const depth = randRange(rng, 1.2, 3.0);
+
+          const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), ang);
+          const s = new THREE.Vector3(width, heightBox, depth);
+          const m4 = new THREE.Matrix4().compose(p, q, s);
+          const color = strataColor(y, topY, botY, theme[0]);
+          instances.push({ m4, color, radiusApprox: Math.max(width, heightBox, depth) * 0.55, p });
         }
       }
     }
 
+    // Add blocky towers/arches here and there for dramatic silhouettes
+    const towerCount = 90 + Math.floor(st.difficulty * 20);
+    for (let t = 0; t < towerCount; t++) {
+      const yBase = randRange(rng, botY + 120, topY - 20);
+      const r = radiusAtY(yBase) * randRange(rng, 0.55, 0.95);
+      const ang = randRange(rng, 0, Math.PI * 2);
+      const x = Math.cos(ang) * r, z = Math.sin(ang) * r;
+      const levels = 3 + Math.floor(rng() * 5);
+      let y = yBase;
+      for (let lv = 0; lv < levels; lv++) {
+        const p = new THREE.Vector3(x + randRange(rng, -1.2, 1.2), y, z + randRange(rng, -1.2, 1.2));
+        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), ang + randRange(rng, -0.2, 0.2));
+        const s = new THREE.Vector3(randRange(rng, 2.0, 4.6), randRange(rng, 1.6, 3.2), randRange(rng, 1.6, 3.6));
+        const m4 = new THREE.Matrix4().compose(p, q, s);
+        const color = strataColor(y, topY, botY, theme[0]);
+        instances.push({ m4, color, radiusApprox: Math.max(s.x, s.y, s.z) * 0.55, p });
+        y += s.y + randRange(rng, 0.6, 1.4);
+      }
+    }
+
     // Build InstancedMesh
-    const mesh = new THREE.InstancedMesh(rockGeo, rockMat, instances.length);
-    const m4 = new THREE.Matrix4(); const q = new THREE.Quaternion(); const v3 = new THREE.Vector3();
+    const mesh = new THREE.InstancedMesh(boxGeo, rockMat, instances.length);
+    const colorAttr = new THREE.InstancedBufferAttribute(new Float32Array(instances.length * 3), 3);
+    const dummy = new THREE.Object3D();
+    const tmpColor = new THREE.Color();
+
     instances.forEach((it, i) => {
-      q.setFromAxisAngle(new THREE.Vector3(0,1,0), it.ry);
-      m4.compose(it.p, q, v3.setScalar(it.s));
-      mesh.setMatrixAt(i, m4);
-      // collider sphere (coarse)
-      collidersRef.current.push(new SphereCollider(it.p.clone(), it.s * 0.92, "rock"));
+      mesh.setMatrixAt(i, it.m4);
+      tmpColor.copy(it.color);
+      colorAttr.setXYZ(i, tmpColor.r, tmpColor.g, tmpColor.b);
+      // Use sparser colliders to keep CPU light
+      if (i % 4 === 0) collidersRef.current.push(new SphereCollider(it.p.clone(), it.radiusApprox, "rock"));
     });
     mesh.instanceMatrix.needsUpdate = true;
+    mesh.geometry.setAttribute('instanceColor', colorAttr);
     worldGroup.add(mesh);
 
-    // Decorative falling dust inside mountain (light performance impact)
-    const dust = buildDustField(theme[1], 1200);
-    worldGroup.add(dust);
+    // Subtle dust
+    const dust = buildDustField(theme[1], 1400); worldGroup.add(dust);
 
-    // Portal near the bottom in a cleared area
-    const portalY = botY + 40;
-    const portalCenter = new THREE.Vector3(0, portalY, 0);
-    const ringR = 9.0; const ringThickness = 1.7;
-    const portalGeo = new THREE.TorusGeometry(ringR, ringThickness, 16, 40);
-    const portalMat = new THREE.MeshStandardMaterial({ color: theme[1], emissive: new THREE.Color(theme[1]).multiplyScalar(0.5), roughness: 0.25 });
-    const portalMesh = new THREE.Mesh(portalGeo, portalMat);
-    portalMesh.position.copy(portalCenter);
-    portalMesh.rotation.x = 0; // lies flat-ish (normal is +Y)
-    portalMesh.userData.center = portalCenter; portalMesh.userData.ringR = ringR; portalMesh.userData.thickness = ringThickness;
-    worldGroup.add(portalMesh); portalMeshRef.current = portalMesh;
-
-    // Tiny collider pearls around ring so you don't clip the torus body
+    // Portal (horizontal ring at bottom)
+    const portalY = botY + 45; const portalCenter = new THREE.Vector3(0, portalY, 0);
+    const ringR = 10.0, ringThickness = 1.8;
+    const portalGeo = new THREE.TorusGeometry(ringR, ringThickness, 16, 44);
+    const portalMesh = new THREE.Mesh(portalGeo, portalMat); portalMesh.position.copy(portalCenter); portalMesh.rotation.x = 0;
+    portalMesh.userData.center = portalCenter; portalMesh.userData.ringR = ringR; portalMesh.userData.thickness = ringThickness; worldGroup.add(portalMesh); portalMeshRef.current = portalMesh;
+    // A few pearls for portal collision
     collidersRef.current.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(ringR, 0, 0)), ringThickness * 0.95, "portal"));
     collidersRef.current.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(-ringR, 0, 0)), ringThickness * 0.95, "portal"));
     collidersRef.current.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(0, 0, ringR)), ringThickness * 0.95, "portal"));
     collidersRef.current.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(0, 0, -ringR)), ringThickness * 0.95, "portal"));
 
-    // Stars/background
+    // Background stars
     const stars = buildStars(theme[2], theme[3]); worldGroup.add(stars);
   }
 
-  function disposeWorld(group) {
-    if (!group) return; group.traverse((obj) => { if (obj.isMesh) { obj.geometry?.dispose?.(); obj.material?.dispose?.(); } }); group.clear();
-  }
+  function disposeWorld(group) { if (!group) return; group.traverse((o)=>{ if (o.isMesh) { o.geometry?.dispose?.(); o.material?.dispose?.(); } }); group.clear(); }
 
   // -------------------- Mesh Builders --------------------
   function buildGliderMesh() {
@@ -433,15 +422,11 @@ export default function SuperflightCleanRoom() {
     return g;
   }
 
-  function buildDustField(colorHex, count = 800) {
+  function buildDustField(colorHex, count = 1000) {
     const geo = new THREE.BufferGeometry(); const positions = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      positions[i * 3 + 0] = (Math.random() - 0.5) * 80;
-      positions[i * 3 + 1] = (Math.random() - 0.5) * 120;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 80;
-    }
+    for (let i = 0; i < count; i++) { positions[i*3+0] = (Math.random()-0.5)*120; positions[i*3+1] = (Math.random()-0.5)*160; positions[i*3+2] = (Math.random()-0.5)*120; }
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    const mat = new THREE.PointsMaterial({ color: colorHex, size: 0.06, transparent: true, opacity: 0.55 });
+    const mat = new THREE.PointsMaterial({ color: colorHex, size: 0.06, transparent: true, opacity: 0.45 });
     const pts = new THREE.Points(geo, mat); pts.position.set(0, (stateRef.current.mountainTopY + stateRef.current.mountainBottomY)/2, 0); return pts;
   }
 
@@ -467,17 +452,17 @@ export default function SuperflightCleanRoom() {
         <div>Diff: {ui.difficulty}</div>
       </div>
 
-      {/* Center reticle */}
+      {/* Reticle */}
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white opacity-60" style={{ pointerEvents: "none" }}>
         <div className="w-1 h-6 bg-white/70 mx-auto rounded" />
         <div className="w-6 h-1 bg-white/70 mx-auto rounded" />
       </div>
 
-      {/* Help / status */}
-      <div className="absolute right-2 top-2 p-2 rounded-xl bg-black/30 text-white text-xs max-w-[260px]">
+      {/* Help */}
+      <div className="absolute right-2 top-2 p-2 rounded-xl bg-black/30 text-white text-xs max-w-[280px]">
         <div className="font-semibold">Controls</div>
-        <div>W/S: pitch up/down</div>
-        <div>A/D: yaw left/right</div>
+        <div>W/S or ↑/↓: pitch</div>
+        <div>A/D or ←/→: yaw</div>
         <div>Q/E: roll (barrel)</div>
         <div>P: pause · R: restart</div>
       </div>
@@ -504,7 +489,7 @@ export default function SuperflightCleanRoom() {
       )}
 
       <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-white text-[11px] opacity-70 bg-black/30 px-2 py-1 rounded-full">
-        Superflight (clean-room) · Downhill gliding through a carved mountain · Keyboard only
+        Downhill gliding · Layered canyon generator · Keyboard & Arrow keys
       </div>
     </div>
   );

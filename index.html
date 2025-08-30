@@ -2,20 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Superflight (clean-room) — Downhill WebGL</title>
+  <title>Superflight (clean-room) — Daylight Mountain Glide</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    html, body { height:100%; margin:0; background:linear-gradient(#1f2937,#0f172a); font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    html, body { height:100%; margin:0; background:linear-gradient(#a7d3ff,#eaf6ff); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
     #app { position:fixed; inset:0; overflow:hidden; }
-    .hud { position:absolute; top:8px; left:8px; color:#fff; background:rgba(0,0,0,.35); padding:8px 10px; border-radius:12px; font-size:13px; line-height:1.15; }
-    .ret { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); color:#fff; opacity:.6; pointer-events:none; }
-    .ret div { background:rgba(255,255,255,.8); border-radius:2px; margin:auto; }
+    .hud { position:absolute; top:8px; left:8px; color:#003; background:rgba(255,255,255,.6); padding:8px 10px; border-radius:12px; font-size:13px; line-height:1.15; backdrop-filter:saturate(1.2) blur(2px); }
+    .ret { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); color:#000; opacity:.35; pointer-events:none; }
+    .ret div { background:rgba(0,0,0,.7); border-radius:2px; margin:auto; }
     .ret .v { width:4px; height:20px; }
     .ret .h { width:20px; height:4px; margin-top:4px; }
-    .help { position:absolute; right:8px; top:8px; color:#fff; background:rgba(0,0,0,.35); padding:8px 10px; border-radius:12px; font-size:12px; max-width:280px; }
+    .help { position:absolute; right:8px; top:8px; color:#003; background:rgba(255,255,255,.6); padding:8px 10px; border-radius:12px; font-size:12px; max-width:300px; backdrop-filter:saturate(1.2) blur(2px); }
     .overlay { position:absolute; inset:0; display:none; place-items:center; color:#fff; }
     .overlay .box { background:rgba(0,0,0,.55); padding:16px 20px; border-radius:18px; text-align:center; }
-    .foot { position:absolute; left:50%; bottom:8px; transform:translateX(-50%); color:#fff; font-size:11px; background:rgba(0,0,0,.3); padding:4px 8px; border-radius:999px; opacity:.75; }
+    .foot { position:absolute; left:50%; bottom:8px; transform:translateX(-50%); color:#003; font-size:11px; background:rgba(255,255,255,.6); padding:4px 8px; border-radius:999px; opacity:.9; }
   </style>
 </head>
 <body>
@@ -33,13 +33,13 @@
 
 <div class="help">
   <div style="font-weight:600;margin-bottom:4px">Controls</div>
-  <div>W/S or ↑/↓: pitch</div>
-  <div>A/D or ←/→: yaw</div>
-  <div>Q/E: roll (barrel)</div>
+  <div>W/S or ↑/↓: pitch (W = nose down, S = nose up)</div>
+  <div>A/D or ←/→: yaw (A = left, D = right)</div>
+  <div>Q/E: roll</div>
   <div>P: pause · R: restart</div>
 </div>
 
-<div id="crash" class="overlay" style="background:rgba(127,0,0,.35);">
+<div id="crash" class="overlay" style="background:rgba(177,0,0,.35);">
   <div class="box">
     <div style="font-size:24px;font-weight:800;letter-spacing:.04em;">CRASHED</div>
     <div style="opacity:.85;margin-top:6px;font-size:13px;">Press R to restart</div>
@@ -47,14 +47,14 @@
   </div>
 </div>
 
-<div id="paused" class="overlay" style="background:rgba(0,0,0,.4);">
+<div id="paused" class="overlay" style="background:rgba(0,0,0,.35);">
   <div class="box">
     <div style="font-size:18px;font-weight:800;letter-spacing:.04em;">PAUSED</div>
     <div style="opacity:.85;margin-top:6px;font-size:13px;">Press P to resume</div>
   </div>
 </div>
 
-<div class="foot">Downhill gliding · Layered canyon generator · Keyboard & Arrow keys</div>
+<div class="foot">Daylight sky · Cloud layer · Mountain range (no caves) · Glide physics</div>
 
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
@@ -63,22 +63,41 @@ import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 function mulberry32(seed){ let t=seed>>>0; return ()=>{ t+=0x6D2B79F5; let r=Math.imul(t^(t>>>15),1|t); r^=r+Math.imul(r^(r>>>7),61|r); return ((r^(r>>>14))>>>0)/4294967296; }; }
 const randRange=(rng,a,b)=>a+(b-a)*rng();
 const choose=(rng,arr)=>arr[Math.floor(rng()*arr.length)];
+const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
+const smooth=(t)=>t*t*(3-2*t); // smoothstep
 
-const THEMES = [
-  [0x8e5a33, 0xbf5af2, 0x2e253f, 0xdcd7c9], // warm canyon + purple accent
-  [0x6c5b7b, 0xf67280, 0x2a2b4a, 0x9fb3c8],
-  [0x3d405b, 0xe07a5f, 0x1a1e26, 0x5b728a],
-];
-
-function strataColor(y, topY, botY, baseHex){
-  const c = new THREE.Color(baseHex);
-  const band = Math.floor((topY - y) / 10) % 2; // 10u strata
-  const shade = band ? 0.82 : 1.06;
-  c.multiplyScalar(shade);
-  return c;
+// seeded 2D value noise
+function makeNoise2D(seed){
+  function hash(i,j){
+    let h = (i|0)*374761393 + (j|0)*668265263 + (seed|0)*1442695040888963407n; // big mix (use BigInt then cast)
+    // JS BigInt -> number safe mix:
+    h = Number((BigInt(h) ^ (BigInt(h)>>13n)) & 0xffffffffn);
+    h = (h ^ (h>>>17)) * 2246822519;
+    h = (h ^ (h>>>15)) >>> 0;
+    return h / 4294967295;
+  }
+  return (x,z)=>{
+    const ix=Math.floor(x), iz=Math.floor(z);
+    const fx=x-ix, fz=z-iz;
+    const u=smooth(fx), v=smooth(fz);
+    const n00=hash(ix,iz),   n10=hash(ix+1,iz);
+    const n01=hash(ix,iz+1), n11=hash(ix+1,iz+1);
+    const nx0=n00+(n10-n00)*u, nx1=n01+(n11-n01)*u;
+    return nx0+(nx1-nx0)*v;
+  };
 }
 
-class SphereCollider { constructor(center, radius, tag='rock'){ this.center=center; this.radius=radius; this.tag=tag; } }
+// fBm
+function makeFBM(noise){ 
+  return (x,z,oct=5,pers=0.5,lacun=2)=>{ 
+    let f=1,a=1,acc=0,sum=0;
+    for(let o=0;o<oct;o++){ acc+=a*noise(x*f,z*f); sum+=a; f*=lacun; a*=pers; }
+    return acc/sum;
+  };
+}
+
+// Ridged
+function ridged(n){ return 1 - Math.abs(2*n - 1); }
 
 ////////////////////////////// DOM
 const app = document.getElementById('app');
@@ -92,14 +111,16 @@ const pausedEl= document.getElementById('paused');
 
 ////////////////////////////// three setup
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 5000);
-camera.position.set(0, 185, 16);
+const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 6000);
+camera.position.set(0, 280, 220);
 
-const theme = THEMES[0];
-scene.fog = new THREE.Fog(new THREE.Color(theme[3]), 50, 1700);
+const fogColor = new THREE.Color('#cfeaff');
+scene.fog = new THREE.Fog(fogColor, 120, 2600);
 
-const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.05); hemi.position.set(0,200,0); scene.add(hemi);
-const dir  = new THREE.DirectionalLight(0xffffff, 0.85); dir.position.set(-70,140,30); scene.add(dir);
+const hemi = new THREE.HemisphereLight(0xcfeaff, 0xbfa17a, 0.9); // bright sky, warm ground
+hemi.position.set(0,400,0); scene.add(hemi);
+const dir  = new THREE.DirectionalLight(0xffffff, 0.8); dir.position.set(-120,200,80); dir.castShadow=false; scene.add(dir);
+const amb  = new THREE.AmbientLight(0xffffff, 0.25); scene.add(amb);
 
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -108,29 +129,28 @@ app.appendChild(renderer.domElement);
 
 ////////////////////////////// state
 const inputs = { w:false,s:false,a:false,d:false,q:false,e:false };
-const colliders = [];
-const world = new THREE.Group(); scene.add(world);
+let terrain = null; // set later
+let clouds = null;
 let portalMesh = null;
 
 const state = {
-  playerPos: new THREE.Vector3(0,180,0),
-  playerQuat: new THREE.Quaternion(),
+  playerPos: new THREE.Vector3(0,280,220),
+  playerQuat: new THREE.Quaternion().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(12))), // slight nose-down
   playerRadius: 1.0,
-  vel: new THREE.Vector3(0,-22,-6),
+  vel: new THREE.Vector3(0,-10,-20),
 
-  gravity: 22,
-  glideAccel: 44,
-  drag: 0.62,
-  maxSpeed: 130,
+  gravity: 9.5,       // ↓ less gravity → more glide
+  glideAccel: 26,     // thrust along forward
+  drag: 0.42,         // gentle drag
+  maxSpeed: 110,
 
-  yawRate: THREE.MathUtils.degToRad(85),
+  yawRate:   THREE.MathUtils.degToRad(90),
   pitchRate: THREE.MathUtils.degToRad(70),
-  rollRate: THREE.MathUtils.degToRad(140),
+  rollRate:  THREE.MathUtils.degToRad(140),
 
-  score: 0, multiplier: 1, maxMultiplier: 12, proxThreshold: 6.0,
+  score: 0, multiplier: 1, maxMultiplier: 12, proxThreshold: 8.0,
   crashed:false, paused:false,
   worldSeed: Math.floor(Math.random()*1e9), difficulty:1,
-  mountainTopY: 140, mountainBottomY: -1400,
   highScore:0,
 };
 
@@ -147,179 +167,155 @@ function buildGlider(){
 }
 const glider = buildGlider(); scene.add(glider);
 
-////////////////////////////// world gen
-function disposeWorld(){
-  world.traverse(o=>{ if(o.isMesh){ o.geometry?.dispose?.(); o.material?.dispose?.(); } });
-  world.clear(); colliders.length = 0; portalMesh = null;
-}
-
-function generateMountainWorld(seed){
-  const rng = mulberry32(seed>>>0);
-  const themeNow = choose(rng, THEMES);
-  if (scene.fog) scene.fog.color.setHex(themeNow[3]);
-
-  // materials
-  const rockMat = new THREE.MeshStandardMaterial({ color:0xffffff, roughness:.95, metalness:.02, vertexColors:true });
-  const portalMat = new THREE.MeshStandardMaterial({ color: themeNow[1], emissive: new THREE.Color(themeNow[1]).multiplyScalar(.5), roughness:.25 });
-
-  const topY = state.mountainTopY, botY = state.mountainBottomY;
-  const height = topY - botY;
-
-  const baseR = 42 + randRange(rng, -6, 8);
-  const minR  = 18 + randRange(rng, -3, 3);
-  const radiusAtY = (y)=>{
-    const t = (y - botY) / height;
-    return THREE.MathUtils.lerp(minR, baseR, Math.pow(t, .55)) + Math.sin(y*.06)*2.2 + Math.cos(y*.017+1.7)*1.8;
+////////////////////////////// terrain gen (heightmap, no caves)
+function buildTerrain(seed){
+  const rng = mulberry32(seed);
+  const theme = {
+    rockLo: new THREE.Color('#d49a6a'), // sand/rock
+    rockHi: new THREE.Color('#8d6442'), // darker strata
+    grass:  new THREE.Color('#9ecb7a'),
+    snow:   new THREE.Color('#f5f7fb')
   };
 
-  // tunnels
-  const tunnelCount = 3 + Math.floor(rng()*3);
-  const tunnels = Array.from({length:tunnelCount}, ()=>({
-    offX:randRange(rng,-8,8), offZ:randRange(rng,-8,8),
-    ax:randRange(rng,6,12), az:randRange(rng,6,12),
-    fx:randRange(rng,.006,.012), fz:randRange(rng,.006,.012),
-    phx:randRange(rng,0,Math.PI*2), phz:randRange(rng,0,Math.PI*2),
-    radius:randRange(rng,3.5,6.2),
-  }));
-  const tunnelCenterAtY = (y,t)=> new THREE.Vector3(
-    t.offX + Math.sin(y*t.fx + t.phx)*t.ax, y,
-    t.offZ + Math.cos(y*t.fz + t.phz)*t.az
-  );
+  const params = {
+    width: 900,
+    length: 5200,
+    segX: 160,
+    segZ: 420,
+    amp: 95,
+    base: -20,
+    slope: 0.04,     // gentle overall descent toward -Z
+    nx: 0.0022,      // noise scale X
+    nz: 0.0022,
+    ridgeMix: 0.55,  // blend fbm/ridge
+  };
 
-  // nibbles
-  const nibbles = Array.from({length:20}, ()=>({ c:new THREE.Vector3(randRange(rng,-20,20), randRange(rng, botY+80, topY-20), randRange(rng,-20,20)), r:randRange(rng,3,10) }));
+  const noise = makeNoise2D(seed ^ 0x9e3779b9);
+  const fbm   = makeFBM(noise);
 
-  // build layered ring slabs
-  const boxGeo = new THREE.BoxGeometry(1,1,1);
-  const instances = [];
-  const layerStep=12, shellStep=2.6, tangentialSpacing=9;
-
-  for(let y=topY; y>=botY; y-=layerStep){
-    const rProf = Math.max(5, radiusAtY(y));
-    const ringLayers = 1 + Math.floor(randRange(rng,0,1.2));
-    for(let rl=0; rl<ringLayers; rl++){
-      const r = Math.max(4, rProf - rl*shellStep);
-      const circumference = 2*Math.PI*r;
-      const count = THREE.MathUtils.clamp(Math.floor(circumference / tangentialSpacing), 22, 60);
-      for(let i=0; i<count; i++){
-        if (rng() < .1) continue;
-        const ang = (i/count)*Math.PI*2 + randRange(rng,-.05,.05);
-        const radJ = randRange(rng,-.9,.9);
-        const x = Math.cos(ang)*(r+radJ), z = Math.sin(ang)*(r+radJ);
-        const p = new THREE.Vector3(x, y + randRange(rng,-1.0,1.0), z);
-        // carve
-        let carve=false;
-        for(let k=0;k<tunnels.length && !carve;k++){
-          const c = tunnelCenterAtY(y, tunnels[k]);
-          if (Math.hypot(p.x-c.x, p.z-c.z) < tunnels[k].radius + 1.6) carve=true;
-        }
-        if (!carve){
-          for (let nb of nibbles){ if (p.distanceTo(nb.c) < nb.r){ carve=true; break; } }
-        }
-        if (carve) continue;
-
-        const width=randRange(rng,2.2,5.4), h=randRange(rng,1.2,2.8), depth=randRange(rng,1.2,3.0);
-        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), ang);
-        const s = new THREE.Vector3(width, h, depth);
-        const m4 = new THREE.Matrix4().compose(p, q, s);
-        const color = strataColor(y, topY, botY, themeNow[0]);
-        instances.push({ m4, color, radiusApprox: Math.max(width,h,depth)*0.55, p });
-      }
-    }
+  // height function mirrors the mesh deformation for accurate collision
+  function heightAt(x,z){
+    // Normalize to noise space
+    const n1 = fbm(x*params.nx, z*params.nz, 5, 0.55, 2.1);
+    const n2 = ridged(fbm(x*params.nx*0.45, z*params.nz*0.45, 4, 0.5, 2.0));
+    const shape = (1-params.ridgeMix)*n1 + params.ridgeMix*n2; // 0..1
+    const slopeTerm = (-(z + params.length*0.35) / params.length) * params.slope * params.amp; // down as z decreases
+    return params.base + shape*params.amp + slopeTerm;
   }
 
-  // towers
-  const towerCount = 90 + Math.floor(state.difficulty*20);
-  for(let t=0;t<towerCount;t++){
-    const yBase = randRange(rng, botY+120, topY-20);
-    const r = radiusAtY(yBase) * randRange(rng, .55, .95);
-    const ang = randRange(rng, 0, Math.PI*2);
-    const x = Math.cos(ang)*r, z = Math.sin(ang)*r;
-    const levels = 3 + Math.floor(rng()*5);
-    let y = yBase;
-    for(let lv=0; lv<levels; lv++){
-      const p = new THREE.Vector3(x + randRange(rng,-1.2,1.2), y, z + randRange(rng,-1.2,1.2));
-      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), ang + randRange(rng,-.2,.2));
-      const s = new THREE.Vector3(randRange(rng,2.0,4.6), randRange(rng,1.6,3.2), randRange(rng,1.6,3.6));
-      const m4 = new THREE.Matrix4().compose(p, q, s);
-      const color = strataColor(y, topY, botY, themeNow[0]);
-      instances.push({ m4, color, radiusApprox: Math.max(s.x,s.y,s.z)*0.55, p });
-      y += s.y + randRange(rng,.6,1.4);
-    }
+  // geometry
+  const geo = new THREE.PlaneGeometry(params.width, params.length, params.segX, params.segZ);
+  geo.rotateX(-Math.PI/2);
+  const pos = geo.attributes.position;
+  const colors = new Float32Array((params.segX+1)*(params.segZ+1)*3);
+
+  let i=0;
+  for(let v=0; v<pos.count; v++){
+    const x = pos.getX(v), z = pos.getZ(v);
+    const y = heightAt(x,z);
+    pos.setY(v, y);
+
+    // vertex color by altitude
+    const t = clamp((y - (params.base-20)) / (params.amp+40), 0, 1);
+    let c = new THREE.Color();
+    if (t < 0.45) c.lerpColors(theme.rockLo, theme.rockHi, t/0.45);
+    else if (t < 0.80) c.lerpColors(theme.rockHi, theme.grass, (t-0.45)/0.35);
+    else c.lerpColors(theme.grass, theme.snow, (t-0.80)/0.20);
+    colors[i++]=c.r; colors[i++]=c.g; colors[i++]=c.b;
   }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors,3));
+  geo.computeVertexNormals();
 
-  // instanced mesh + per-instance color
-  const mesh = new THREE.InstancedMesh(boxGeo, rockMat, instances.length);
-  const colorAttr = new THREE.InstancedBufferAttribute(new Float32Array(instances.length*3), 3);
-  instances.forEach((it,i)=>{
-    mesh.setMatrixAt(i, it.m4);
-    colorAttr.setXYZ(i, it.color.r, it.color.g, it.color.b);
-    if (i%4===0) colliders.push(new SphereCollider(it.p.clone(), it.radiusApprox, 'rock'));
-  });
-  mesh.instanceMatrix.needsUpdate = true;
-  mesh.instanceColor = colorAttr;
-  world.add(mesh);
+  const mat = new THREE.MeshStandardMaterial({ vertexColors:true, flatShading:false, roughness:0.95, metalness:0.02 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = false; mesh.castShadow = false;
 
-  // dust
-  world.add(buildDustField(themeNow[1], 1400));
+  // clouds: billboards high above
+  const cloudGroup = buildCloudLayer(seed, params);
 
-  // portal
-  const portalY = state.mountainBottomY + 45;
-  const portalCenter = new THREE.Vector3(0, portalY, 0);
-  const ringR=10.0, ringT=1.8;
-  const torus = new THREE.Mesh(new THREE.TorusGeometry(ringR, ringT, 16, 44), portalMat);
-  torus.position.copy(portalCenter);
-  torus.rotation.x = 0;
-  torus.userData.center = portalCenter; torus.userData.ringR = ringR; torus.userData.thickness = ringT;
-  world.add(torus); portalMesh = torus;
+  // portal near far end above a valley
+  const portalZ = -params.length/2 + 140;
+  const portalY = heightAt(0, portalZ) + 35;
+  const ringR=12, ringT=1.8;
+  const portalMat = new THREE.MeshStandardMaterial({ color: 0x7aa2ff, emissive: new THREE.Color(0x7aa2ff).multiplyScalar(.5), roughness:.2, metalness:0.0 });
+  const portalMeshLocal = new THREE.Mesh(new THREE.TorusGeometry(ringR, ringT, 16, 44), portalMat);
+  portalMeshLocal.position.set(0, portalY, portalZ);
+  portalMeshLocal.userData.center = portalMeshLocal.position.clone();
+  portalMeshLocal.userData.ringR = ringR;
+  portalMeshLocal.userData.thickness = ringT;
 
-  // pearl colliders around ring
-  colliders.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3( ringR,0,0)), ringT*.95, 'portal'));
-  colliders.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(-ringR,0,0)), ringT*.95, 'portal'));
-  colliders.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(0,0, ringR)), ringT*.95, 'portal'));
-  colliders.push(new SphereCollider(portalCenter.clone().add(new THREE.Vector3(0,0,-ringR)), ringT*.95, 'portal'));
+  // pack everything
+  const group = new THREE.Group();
+  group.add(mesh);
+  group.add(cloudGroup);
+  group.add(portalMeshLocal);
 
-  // stars
-  world.add(buildStars(themeNow[2], themeNow[3]));
+  scene.add(group);
+
+  return {
+    group,
+    params,
+    heightAt,
+    portal: portalMeshLocal
+  };
 }
 
-function buildDustField(colorHex, count=1000){
-  const geo = new THREE.BufferGeometry();
-  const positions = new Float32Array(count*3);
-  for(let i=0;i<count;i++){
-    positions[i*3+0] = (Math.random()-0.5)*120;
-    positions[i*3+1] = (Math.random()-0.5)*160;
-    positions[i*3+2] = (Math.random()-0.5)*120;
-  }
-  geo.setAttribute('position', new THREE.BufferAttribute(positions,3));
-  const mat = new THREE.PointsMaterial({ color: colorHex, size:.06, transparent:true, opacity:.45 });
-  const pts = new THREE.Points(geo, mat);
-  pts.position.set(0, (state.mountainTopY + state.mountainBottomY)/2, 0);
-  return pts;
+// simple circular-gradient sprite texture
+function makeCloudTexture(){
+  const s=128, cnv=document.createElement('canvas'); cnv.width=cnv.height=s;
+  const ctx=cnv.getContext('2d');
+  const g=ctx.createRadialGradient(s/2,s/2,10, s/2,s/2,s/2);
+  g.addColorStop(0,'rgba(255,255,255,0.9)');
+  g.addColorStop(1,'rgba(255,255,255,0.0)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,s, s);
+  const tex = new THREE.CanvasTexture(cnv); tex.anisotropy = 4; return tex;
 }
 
-function buildStars(colorTop, colorBottom){
-  const count=900, geo=new THREE.BufferGeometry(), positions=new Float32Array(count*3);
+function buildCloudLayer(seed, params){
+  const rng = mulberry32(seed ^ 0xabcdef);
+  const tex = makeCloudTexture();
+  const grp = new THREE.Group();
+  const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent:true, depthWrite:false });
+  const count = 80;
   for(let i=0;i<count;i++){
-    const r=900+Math.random()*700, th=Math.random()*Math.PI*2, ph=Math.random()*Math.PI;
-    positions[i*3+0]= r*Math.sin(ph)*Math.cos(th);
-    positions[i*3+1]= r*Math.cos(ph);
-    positions[i*3+2]= r*Math.sin(ph)*Math.sin(th);
+    const sp = new THREE.Sprite(spriteMat.clone());
+    sp.position.set(randRange(rng,-params.width*0.45, params.width*0.45), 320 + randRange(rng,-10,10), randRange(rng, -params.length*0.45, params.length*0.05));
+    const s = randRange(rng, 60, 140);
+    sp.scale.set(s, s, 1);
+    sp.material.opacity = randRange(rng, 0.35, 0.75);
+    grp.add(sp);
   }
-  geo.setAttribute('position', new THREE.BufferAttribute(positions,3));
-  const mat=new THREE.PointsMaterial({ color: colorTop, size:.8, transparent:true, opacity:.35 });
-  return new THREE.Points(geo, mat);
+  return grp;
+}
+
+////////////////////////////// build world
+function disposeWorld(){
+  if (!terrain) return;
+  scene.remove(terrain.group);
+  terrain.group.traverse(o=>{ if (o.isMesh){ o.geometry?.dispose?.(); o.material?.dispose?.(); } if (o.isSprite){ o.material?.map?.dispose?.(); o.material?.dispose?.(); }});
+  portalMesh = null;
+  terrain = null;
+}
+
+function generateWorld(seed){
+  disposeWorld();
+  terrain = buildTerrain(seed);
+  portalMesh = terrain.portal;
+  uiSeed.textContent = seed;
+  // start high & upstream
+  state.playerPos.set(0, 280, 220);
+  state.playerQuat.identity().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(12)));
+  state.vel.set(0, -10, -20);
 }
 
 ////////////////////////////// input
 function setKey(e, down){
-  // prevent scrolling on arrows/space
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
   switch(e.code){
-    case 'KeyW': case 'ArrowUp':    inputs.w = down; break;
-    case 'KeyS': case 'ArrowDown':  inputs.s = down; break;
-    case 'KeyA': case 'ArrowLeft':  inputs.a = down; break;
-    case 'KeyD': case 'ArrowRight': inputs.d = down; break;
+    case 'KeyW': case 'ArrowUp':    inputs.w = down; break; // W = nose down (plane feel)
+    case 'KeyS': case 'ArrowDown':  inputs.s = down; break; // S = nose up
+    case 'KeyA': case 'ArrowLeft':  inputs.a = down; break; // yaw left
+    case 'KeyD': case 'ArrowRight': inputs.d = down; break; // yaw right
     case 'KeyQ': inputs.q = down; break;
     case 'KeyE': inputs.e = down; break;
     case 'KeyP': if(down) togglePause(); break;
@@ -329,34 +325,20 @@ function setKey(e, down){
 window.addEventListener('keydown', e=>setKey(e,true), {passive:false});
 window.addEventListener('keyup',   e=>setKey(e,false), {passive:false});
 
-////////////////////////////// loop
-function nearestCollider(playerPos, playerRadius){
-  let min=Infinity, tag=null;
-  for(let i=0;i<colliders.length;i++){
-    const c=colliders[i];
-    const d = playerPos.distanceTo(c.center) - (c.radius + playerRadius);
-    if (d < min){ min=d; tag=c.tag; }
-  }
-  if (!isFinite(min)) min=9999;
-  return { nearestDist:min, nearestTag:tag };
-}
-
-function doCrash(){ state.crashed=true; crashEl.style.display='grid'; }
+////////////////////////////// game flow
+function doCrash(){ state.crashed=true; crashEl.style.display='grid'; state.highScore = Math.max(state.highScore, state.score|0); document.getElementById('uiHi').textContent = state.highScore.toFixed(0); }
 function togglePause(){ state.paused=!state.paused; pausedEl.style.display = state.paused ? 'grid' : 'none'; }
 function restart(){
-  state.playerPos.set(0, state.mountainTopY + 40, 0);
-  state.playerQuat.identity().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(20)));
-  state.vel.set(0,-22,-6);
+  state.playerPos.set(0, 280, 220);
+  state.playerQuat.identity().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(12)));
+  state.vel.set(0, -10, -20);
   state.score=0; state.multiplier=1; state.crashed=false;
   crashEl.style.display='none';
 }
-
 function nextWorld(){
   state.worldSeed = (state.worldSeed * 1664525 + 1013904223) >>> 0;
   state.difficulty += 1;
-  disposeWorld();
-  generateMountainWorld(state.worldSeed);
-  restart(); // start at top of new mountain
+  generateWorld(state.worldSeed);
 }
 
 function resize(){
@@ -367,73 +349,69 @@ function resize(){
 window.addEventListener('resize', resize);
 resize();
 
-generateMountainWorld(state.worldSeed);
-uiSeed.textContent = state.worldSeed;
+generateWorld(state.worldSeed);
+
+////////////////////////////// loop
+function terrainDistanceBelow(pos){
+  const yGround = terrain.heightAt(pos.x, pos.z);
+  return pos.y - yGround;
+}
 
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(()=>{
   const dt = Math.min(0.05, clock.getDelta());
   if (state.paused || state.crashed) { renderer.render(scene,camera); return; }
 
-  // input → orientation
-  const yaw   = ((inputs.d?1:0) - (inputs.a?1:0)) * state.yawRate   * dt;
-  const pitch = ((inputs.s?1:0) - (inputs.w?1:0)) * state.pitchRate * dt;
-  const roll  = ((inputs.e?1:0) - (inputs.q?1:0)) * state.rollRate  * dt;
+  // controls → orientation (plane-like)
+  const yaw   = ((inputs.a?1:0) - (inputs.d?1:0)) * state.yawRate   * dt; // D = right
+  const pitch = ((inputs.s?1:0) - (inputs.w?1:0)) * state.pitchRate * dt; // W = nose down, S = up
+  const roll  = ((inputs.q?1:0) - (inputs.e?1:0)) * state.rollRate  * dt; // Q left, E right
 
   const qYaw   = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),  yaw);
   const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),  pitch);
   const qRoll  = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), -roll);
   state.playerQuat.multiply(qYaw).multiply(qPitch).multiply(qRoll).normalize();
 
-  // forward & physics
+  // forward & physics (glide)
   const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(state.playerQuat).normalize();
   const pitchDown = Math.max(0, -fwd.y);
-  const thrust = (0.25 + pitchDown) * state.glideAccel;
+  const thrust = (0.30 + pitchDown) * state.glideAccel;
 
   state.vel.addScaledVector(new THREE.Vector3(0,-1,0), state.gravity*dt);
   state.vel.addScaledVector(fwd, thrust*dt);
 
-  const drag = 1 - Math.exp(-state.drag * dt);
-  state.vel.multiplyScalar(1 - drag);
+  const drag = 1 - Math.exp(-state.drag * dt); state.vel.multiplyScalar(1 - drag);
+  const spd = state.vel.length(); if (spd > state.maxSpeed) state.vel.multiplyScalar(state.maxSpeed/spd);
 
-  const spd = state.vel.length();
-  if (spd > state.maxSpeed) state.vel.multiplyScalar(state.maxSpeed/spd);
-
+  // small horizontal nudge so you keep moving
   const horiz = new THREE.Vector3(state.vel.x,0,state.vel.z); const hlen=horiz.length();
-  if (hlen < 3){
-    const fH = new THREE.Vector3(fwd.x,0,fwd.z).normalize();
-    state.vel.addScaledVector(fH, (3 - hlen) * 0.6);
-  }
+  if (hlen < 8){ const fH = new THREE.Vector3(fwd.x,0,fwd.z).normalize(); state.vel.addScaledVector(fH, (8 - hlen) * 0.35); }
 
   state.playerPos.addScaledVector(state.vel, dt);
 
   // camera
-  const camOffLocal = new THREE.Vector3(0,1.9,8.0);
+  const camOffLocal = new THREE.Vector3(0, 2.2, 9.0);
   const camPos = camOffLocal.clone().applyQuaternion(state.playerQuat).add(state.playerPos);
   camera.position.lerp(camPos, 0.2);
-  camera.lookAt(state.playerPos.clone().add(fwd.clone().multiplyScalar(16)));
+  camera.lookAt(state.playerPos.clone().add(fwd.clone().multiplyScalar(18)));
 
   // glider
   glider.position.copy(state.playerPos);
   glider.quaternion.copy(state.playerQuat);
 
-  // collisions & proximity
-  const { nearestDist } = nearestCollider(state.playerPos, state.playerRadius);
-  if (nearestDist < 0) { state.highScore = Math.max(state.highScore, state.score|0); document.getElementById('uiHi').textContent = state.highScore.toFixed(0); doCrash(); renderer.render(scene,camera); return; }
+  // ground collision/proximity
+  const distBelow = terrainDistanceBelow(state.playerPos); // >0 if above ground
+  const nearestDist = distBelow - state.playerRadius;
+  if (nearestDist < 0) { doCrash(); renderer.render(scene,camera); return; }
 
-  const proxActive = nearestDist < state.proxThreshold;
-  if (proxActive){
-    const closeness = 1 - THREE.MathUtils.clamp(nearestDist / state.proxThreshold, 0, 1);
-    const gain = (5 + spd * 0.18) * state.multiplier * (0.25 + closeness * 1.3);
-    state.score += gain * dt;
-    if (state.multiplier < state.maxMultiplier){
-      state.multiplier = Math.min(state.maxMultiplier, state.multiplier + dt * (0.15 + closeness * 0.45));
-    }
-  } else {
-    state.multiplier = Math.max(1, state.multiplier - dt * 1.5);
-  }
+  // scoring (closer to ground ⇒ more score)
+  const closeness = clamp(1 - (nearestDist / state.proxThreshold), 0, 1);
+  const gain = (4 + spd * 0.16) * state.multiplier * (0.25 + closeness * 1.4);
+  state.score += gain * dt;
+  if (closeness > 0.15) state.multiplier = Math.min(state.maxMultiplier, state.multiplier + dt * (0.15 + closeness * 0.45));
+  else state.multiplier = Math.max(1, state.multiplier - dt * 1.2);
 
-  // portal detect
+  // portal at far end
   if (portalMesh){
     const c = portalMesh.userData.center, ringR=portalMesh.userData.ringR, thick=portalMesh.userData.thickness;
     const dx=state.playerPos.x-c.x, dz=state.playerPos.z-c.z, dy=Math.abs(state.playerPos.y-c.y);

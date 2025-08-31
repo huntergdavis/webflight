@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Superflight (clean-room) — Arcade Aero + Ultra Mountains</title>
+  <title>Superflight (clean-room) — Arcade Aero + Peak LOD</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body { height:100%; margin:0; background:linear-gradient(#a7d3ff,#eaf6ff); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
@@ -12,10 +12,11 @@
     .ret div { background:rgba(0,0,0,.6); border-radius:2px; margin:auto; }
     .ret .v { width:4px; height:20px; }
     .ret .h { width:20px; height:4px; margin-top:4px; }
-    .help { position:absolute; right:8px; top:8px; color:#003; background:rgba(255,255,255,.6); padding:8px 10px; border-radius:12px; font-size:12px; max-width:360px; backdrop-filter:saturate(1.2) blur(2px); }
+    .help { position:absolute; right:8px; top:8px; color:#003; background:rgba(255,255,255,.6); padding:8px 10px; border-radius:12px; font-size:12px; max-width:380px; backdrop-filter:saturate(1.2) blur(2px); }
     .overlay { position:absolute; inset:0; display:none; place-items:center; color:#fff; }
-    .overlay .box { background:rgba(0,0,0,.55); padding:16px 20px; border-radius:18px; text-align:center; }
+    .overlay .box { background:rgba(0,0,0,.6); padding:16px 20px; border-radius:18px; text-align:center; }
     .foot { position:absolute; left:50%; bottom:8px; transform:translateX(-50%); color:#003; font-size:11px; background:rgba(255,255,255,.6); padding:4px 8px; border-radius:999px; opacity:.9; }
+    #err { position:fixed; right:8px; bottom:8px; max-width:46ch; background:#220; color:#fee; font:12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding:8px 10px; border-radius:12px; display:none; white-space:pre-wrap; }
   </style>
 </head>
 <body>
@@ -28,7 +29,7 @@
   <div><b>Alt:</b> <span id="uiAlt">0</span> m</div>
   <div><b>Seed:</b> <span id="uiSeed">0</span></div>
   <div><b>Diff:</b> <span id="uiDiff">1</span></div>
-  <div><b>Quality:</b> <span id="uiQual">Ultra (10×)</span></div>
+  <div><b>Quality:</b> <span id="uiQual">High</span></div>
 </div>
 
 <div class="ret"><div class="v"></div><div class="h"></div></div>
@@ -56,12 +57,13 @@
   </div>
 </div>
 
-<div class="foot">Arcade aero (loops/banked turns) · Ultra peak terrain · Clouds & depth cues</div>
+<div class="foot">Arcade aero (loops/banked turns) · Peak terrain LOD · Clouds & depth cues</div>
+<div id="err"></div>
 
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
-/* ========= math & noise utils ========= */
+/* ========= basic utils ========= */
 const rad = THREE.MathUtils.degToRad;
 const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
 function mulberry32(seed){ let t=seed>>>0; return ()=>{ t+=0x6D2B79F5; let r=Math.imul(t^(t>>>15),1|t); r^=r+Math.imul(r^(r>>>7),61|r); return ((r^(r>>>14))>>>0)/4294967296; }; }
@@ -94,7 +96,17 @@ function makeFBM(noise){
 }
 function ridged(n){ return 1 - Math.abs(2*n - 1); }
 
-/* ========= DOM hooks ========= */
+/* ========= error helper ========= */
+const errBox = document.getElementById('err');
+function showError(e){
+  errBox.style.display='block';
+  errBox.textContent = (typeof e === 'string') ? e : (e?.message || String(e));
+  console.error(e);
+}
+window.addEventListener('error', e=>showError(e.error||e.message));
+window.addEventListener('unhandledrejection', e=>showError(e.reason||e));
+
+/* ========= DOM refs ========= */
 const app = document.getElementById('app');
 const uiScore = document.getElementById('uiScore');
 const uiMult  = document.getElementById('uiMult');
@@ -128,30 +140,30 @@ const inputs = { w:false,s:false,a:false,d:false,q:false,e:false };
 function setKey(e, down){
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
   switch(e.code){
-    case 'KeyW': case 'ArrowUp':    inputs.w = down; break; // W = nose down
-    case 'KeyS': case 'ArrowDown':  inputs.s = down; break; // S = nose up
-    case 'KeyA': case 'ArrowLeft':  inputs.a = down; break; // yaw left
-    case 'KeyD': case 'ArrowRight': inputs.d = down; break; // yaw right
-    case 'KeyQ': inputs.q = down; break;                   // roll left
-    case 'KeyE': inputs.e = down; break;                   // roll right
+    case 'KeyW': case 'ArrowUp':    inputs.w = down; break;
+    case 'KeyS': case 'ArrowDown':  inputs.s = down; break;
+    case 'KeyA': case 'ArrowLeft':  inputs.a = down; break;
+    case 'KeyD': case 'ArrowRight': inputs.d = down; break;
+    case 'KeyQ': inputs.q = down; break;
+    case 'KeyE': inputs.e = down; break;
     case 'KeyP': if(down) togglePause(); break;
     case 'KeyR': if(down) restart(); break;
-    case 'Digit1': if(down) { quality='high'; uiQual.textContent='High'; generateWorld(state.worldSeed, quality); } break;
-    case 'Digit2': if(down) { quality='ultra'; uiQual.textContent='Ultra (10×)'; generateWorld(state.worldSeed, quality); } break;
+    case 'Digit1': if(down) { setQuality('high'); } break;
+    case 'Digit2': if(down) { setQuality('ultra'); } break;
     case 'KeyN': if(down) { nextSeed(); } break;
   }
 }
 window.addEventListener('keydown', e=>setKey(e,true), {passive:false});
 window.addEventListener('keyup',   e=>setKey(e,false), {passive:false});
 
-/* ========= player & physics state ========= */
+/* ========= physics & player ========= */
 const state = {
   playerPos: new THREE.Vector3(0,1600,4200),
   playerQuat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), rad(8)),
   playerRadius: 1,
-  vel: new THREE.Vector3(0,-16,-55),
+  vel: new THREE.Vector3(0,-10,-50),
 
-  // Arcade aero constants
+  // Arcade aero
   gravity: 9.0,
   qScale: 0.018,
   liftScale: 0.16,
@@ -168,29 +180,27 @@ const state = {
 
   maxSpeed: 175,
 
-  // control rates
   yawRate:   rad(95),
   pitchRate: rad(75),
   rollRate:  rad(150),
 
-  // meta
   score:0, multiplier:1, maxMultiplier:12, proxThreshold:14,
   crashed:false, paused:false,
   worldSeed: Math.floor(Math.random()*1e9), difficulty:1, highScore:0,
 };
 
-let quality = 'ultra'; // default to Ultra (10×)
-uiQual.textContent = 'Ultra (10×)';
+let quality = 'high'; // default STABLE; toggle 'ultra' with 2
+uiQual.textContent = 'High';
 
-/* ========= glider + shadow ========= */
+/* ========= glider (slightly bigger) + shadow ========= */
 function buildGlider(){
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.ConeGeometry(0.5,1.8,6), new THREE.MeshStandardMaterial({color:0xffffff, roughness:.4, metalness:.1}));
+  const body = new THREE.Mesh(new THREE.ConeGeometry(0.7,2.4,6), new THREE.MeshStandardMaterial({color:0xffffff, roughness:.4, metalness:.1}));
   body.rotation.x = Math.PI/2; g.add(body);
-  const wing = new THREE.Mesh(new THREE.BoxGeometry(3.2,.08,.6), new THREE.MeshStandardMaterial({color:0x87ceeb, roughness:.6}));
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(4.2,.10,.7), new THREE.MeshStandardMaterial({color:0x87ceeb, roughness:.6}));
   wing.position.set(0,0,-.1); g.add(wing);
-  const tail = new THREE.Mesh(new THREE.BoxGeometry(.9,.06,.5), new THREE.MeshStandardMaterial({color:0x87ceeb, roughness:.6}));
-  tail.position.set(0,-.2,.4); tail.rotation.z = rad(15); g.add(tail);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(1.2,.08,.6), new THREE.MeshStandardMaterial({color:0x87ceeb, roughness:.6}));
+  tail.position.set(0,-.25,.5); tail.rotation.z = rad(15); g.add(tail);
   return g;
 }
 const glider = buildGlider(); scene.add(glider);
@@ -205,7 +215,7 @@ function makeShadowTexture(){
 const shadowSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeShadowTexture(), transparent:true, depthWrite:false, opacity:.8 }));
 shadowSprite.renderOrder = -1; scene.add(shadowSprite);
 
-/* ========= terrain generation (tiled for Ultra 10×) ========= */
+/* ========= terrain (tiled LOD) ========= */
 let terrain = null; // {group, params, heightAt, portal}
 let portalMesh = null;
 
@@ -218,91 +228,61 @@ function makeCloudTexture(){
   ctx.fillStyle=g; ctx.fillRect(0,0,s, s);
   const tex = new THREE.CanvasTexture(cnv); tex.anisotropy = 4; return tex;
 }
-
 function buildCloudLayer(seed, params){
-  const rng = mulberry32(seed ^ 0xabcdef);
   const tex = makeCloudTexture();
   const grp = new THREE.Group();
-  const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent:true, depthWrite:false });
   const count = quality==='ultra' ? 220 : 160;
   for(let i=0;i<count;i++){
-    const sp = new THREE.Sprite(spriteMat.clone());
-    sp.position.set(
-      (Math.random()-0.5)*params.width*1.2,
-      1700 + (Math.random()-0.5)*120,
-      (Math.random()-0.30)*params.length
-    );
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent:true, depthWrite:false, opacity: 0.26 + Math.random()*0.34 }));
+    sp.position.set((Math.random()-0.5)*params.width*1.2, 1700 + (Math.random()-0.5)*120, (Math.random()-0.30)*params.length);
     const s = (quality==='ultra' ? 140 : 120) + Math.random()*180;
     sp.scale.set(s, s, 1);
-    sp.material.opacity = 0.26 + Math.random()*0.34;
     grp.add(sp);
   }
   return grp;
 }
 
-/* Height function tuned for tall, peaky mountains */
 function makeHeightFn(seed, params){
   const noise = makeNoise2D(seed ^ 0x9e3779b9);
   const fbm   = makeFBM(noise);
   const nx=params.nx, nz=params.nz;
-
   return (x,z)=>{
-    const n1 = fbm(x*nx, z*nz, 7, 0.55, 2.05);                 // broad shapes
-    const n2 = ridged(fbm(x*nx*0.6, z*nz*0.6, 6, 0.5, 2.0));   // ridges
-    const n3 = fbm(x*nx*5.0, z*nz*5.0, 3, 0.5, 2.0);           // micro detail
-    const base = (1-params.ridgeMix)*n1 + params.ridgeMix*n2;  // 0..1
-    const peaky = 1 - Math.pow(1 - base, params.peakSharp);    // sharpen peaks
+    const n1 = fbm(x*nx, z*nz, 7, 0.55, 2.05);
+    const n2 = ridged(fbm(x*nx*0.6, z*nz*0.6, 6, 0.5, 2.0));
+    const n3 = fbm(x*nx*5.0, z*nz*5.0, 3, 0.5, 2.0);
+    const base = (1-params.ridgeMix)*n1 + params.ridgeMix*n2;
+    const peaky = 1 - Math.pow(1 - base, params.peakSharp);
     const shaped = clamp(peaky + (n3-0.5)*params.microAmp, 0, 1);
     const slopeTerm = (-(z + params.length*0.30) / params.length) * params.slope * params.amp;
     return params.base + shaped*params.amp + slopeTerm;
   };
 }
 
-/* Build terrain as tiles (Ultra) or fewer tiles (High) */
 function buildTerrain(seed){
   const isUltra = quality==='ultra';
+  // LOD settings: keep Ultra heavy but under ~700k verts
   const params = isUltra ? {
-    width:  6400,
-    length: 24000,
-    amp:    2600,   // very tall
-    base:   -140,
-    slope:  0.02,
-    nx:     0.0012,
-    nz:     0.0012,
-    ridgeMix: 0.82,
-    microAmp: 0.18,
-    peakSharp: 3.6,
-
-    // tiling (Ultra ≈10× vertices vs prior build)
-    tilesX: 10, tilesZ: 26,
-    tileSeg: 96,
+    width:  6400, length: 24000,
+    amp: 2600, base: -140, slope: 0.02,
+    nx: 0.0012, nz: 0.0012, ridgeMix: 0.82, microAmp: 0.18, peakSharp: 3.6,
+    tilesX: 8, tilesZ: 20, tileSeg: 64,   // ≈ 65^2 * 160 = ~676k verts
   } : {
-    width:  4200,
-    length: 16000,
-    amp:    1500,
-    base:   -120,
-    slope:  0.02,
-    nx:     0.0013,
-    nz:     0.0013,
-    ridgeMix: 0.78,
-    microAmp: 0.16,
-    peakSharp: 2.1,
-
-    tilesX: 6, tilesZ: 18,
-    tileSeg: 64,
+    width:  4200, length: 16000,
+    amp: 1500, base: -120, slope: 0.02,
+    nx: 0.0013, nz: 0.0013, ridgeMix: 0.78, microAmp: 0.16, peakSharp: 2.1,
+    tilesX: 6, tilesZ: 14, tileSeg: 48,   // ≈ 49^2 * 84 = ~201k verts
   };
 
   const heightAt = makeHeightFn(seed, params);
 
   const group = new THREE.Group();
-  const colorsCache = {};
   const mat = new THREE.MeshStandardMaterial({ vertexColors:true, flatShading:false, roughness:0.95, metalness:0.02 });
 
-  // build tiles
   const startX = -params.width/2, startZ = -params.length/2;
   const tileW = params.width / params.tilesX;
   const tileL = params.length / params.tilesZ;
 
+  // build tiles (LOCAL coords for x/z; place tile by mesh.position → better culling)
   for (let tz=0; tz<params.tilesZ; tz++){
     for (let tx=0; tx<params.tilesX; tx++){
       const geo = new THREE.PlaneGeometry(tileW, tileL, params.tileSeg, params.tileSeg);
@@ -311,44 +291,35 @@ function buildTerrain(seed){
       const vcount = pos.count;
       const colors = new Float32Array(vcount*3);
 
-      // tile origin (center)
-      const cx = startX + tileW*(tx+0.5);
-      const cz = startZ + tileL*(tz+0.5);
+      const ox = startX + tileW*(tx+0.5);
+      const oz = startZ + tileL*(tz+0.5);
 
-      // per-vertex: move to world, sample height, color by altitude with banding
       let i=0;
       for(let v=0; v<vcount; v++){
         const lx = pos.getX(v), lz = pos.getZ(v);
-        const x = cx + lx, z = cz + lz;
-        const y = heightAt(x,z);
-        pos.setX(v, x); pos.setY(v, y); pos.setZ(v, z);
+        const wx = ox + lx, wz = oz + lz;
+        const y = heightAt(wx,wz);
+        pos.setY(v, y);
 
-        // color by altitude
+        // color by altitude + subtle contour
         const t = clamp((y - (params.base-140)) / (params.amp+600), 0, 1);
-        let c;
-        // cache simple ramp steps to avoid new Color allocations hot path
-        const key = t.toFixed(2);
-        if (colorsCache[key]) { c = colorsCache[key]; }
-        else {
-          const rockLo = new THREE.Color('#cda077');
-          const rockHi = new THREE.Color('#8d6442');
-          const grass  = new THREE.Color('#9ecb7a');
-          const snow   = new THREE.Color('#f5f7fb');
-          c = new THREE.Color();
-          if (t < 0.45) c.lerpColors(rockLo, rockHi, t/0.45);
-          else if (t < 0.80) c.lerpColors(rockHi, grass, (t-0.45)/0.35);
-          else c.lerpColors(grass, snow, (t-0.80)/0.20);
-          // contour bands for depth cue
-          const band = ((Math.floor((y+120)/60)%2) ? 0.95 : 1.05);
-          c.multiplyScalar(band);
-          colorsCache[key] = c;
-        }
+        const rockLo = new THREE.Color('#cda077');
+        const rockHi = new THREE.Color('#8d6442');
+        const grass  = new THREE.Color('#9ecb7a');
+        const snow   = new THREE.Color('#f5f7fb');
+        const c = new THREE.Color();
+        if (t < 0.45) c.lerpColors(rockLo, rockHi, t/0.45);
+        else if (t < 0.80) c.lerpColors(rockHi, grass, (t-0.45)/0.35);
+        else c.lerpColors(grass, snow, (t-0.80)/0.20);
+        const band = ((Math.floor((y+120)/60)%2) ? 0.95 : 1.05);
+        c.multiplyScalar(band);
         colors[i++]=c.r; colors[i++]=c.g; colors[i++]=c.b;
       }
       geo.setAttribute('color', new THREE.BufferAttribute(colors,3));
       geo.computeVertexNormals();
 
       const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(ox, 0, oz); // << keep local vertices; place tile by transform
       group.add(mesh);
     }
   }
@@ -356,7 +327,7 @@ function buildTerrain(seed){
   // clouds
   const cloudGroup = buildCloudLayer(seed, params); group.add(cloudGroup);
 
-  // portal near far end above a valley
+  // portal near far end (optional)
   const portalZ = -params.length/2 + 240;
   const portalY = heightAt(0, portalZ) + (isUltra? 90 : 80);
   const ringR= isUltra? 24 : 22, ringT= isUltra? 2.8 : 2.6;
@@ -369,7 +340,6 @@ function buildTerrain(seed){
   group.add(portalMeshLocal);
 
   scene.add(group);
-
   return { group, params, heightAt, portal: portalMeshLocal };
 }
 
@@ -379,7 +349,7 @@ function terrainNormalAt(x,z){
   const n = new THREE.Vector3(-(hR-hL)/(2*e), 1, -(hU-hD)/(2*e)); return n.normalize();
 }
 
-/* ========= world management ========= */
+/* ========= world mgmt ========= */
 function disposeWorld(){
   if (!terrain) return;
   scene.remove(terrain.group);
@@ -390,25 +360,39 @@ function disposeWorld(){
   portalMesh = null;
   terrain = null;
 }
-function generateWorld(seed, q=quality){
-  quality=q; // persist
+
+function generateWorld(seed){
+  const start = performance.now();
   disposeWorld();
   terrain = buildTerrain(seed);
   portalMesh = terrain.portal;
   uiSeed.textContent = seed;
 
-  // start based on map size
+  // start high above actual ground at spawn Z
   const startZ = terrain.params.length * 0.42;
-  state.playerPos.set(0, 1600, startZ);
+  const startY = terrainHeightAt(0, startZ) + 420; // safe separation
+  state.playerPos.set(0, startY, startZ);
   state.playerQuat.identity().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), rad(8)));
   const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(state.playerQuat).normalize();
-  state.vel.copy(fwd).multiplyScalar(65);
-  state.vel.y -= 6;
+  state.vel.copy(fwd).multiplyScalar(65); state.vel.y -= 6;
+
+  const t = performance.now() - start;
+  // if Ultra was too slow, auto-fallback to High
+  if (quality==='ultra' && t > 2500){
+    showError(`Ultra build took ${t.toFixed(0)}ms → switching to High for stability`);
+    setQuality('high');
+  }
+}
+
+function setQuality(q){
+  quality = q;
+  uiQual.textContent = (q==='ultra') ? 'Ultra (10×)' : 'High';
+  generateWorld(state.worldSeed);
 }
 function nextSeed(){
   state.worldSeed = (state.worldSeed * 1664525 + 1013904223) >>> 0;
   state.difficulty += 1;
-  generateWorld(state.worldSeed, quality);
+  generateWorld(state.worldSeed);
 }
 
 /* ========= pause/restart ========= */
@@ -416,11 +400,11 @@ function togglePause(){ state.paused=!state.paused; pausedEl.style.display = sta
 function doCrash(){ state.crashed=true; crashEl.style.display='grid'; state.highScore = Math.max(state.highScore, state.score|0); document.getElementById('uiHi').textContent = state.highScore.toFixed(0); }
 function restart(){
   const startZ = terrain ? terrain.params.length * 0.42 : 4200;
-  state.playerPos.set(0, 1600, startZ);
+  const startY = terrain ? terrainHeightAt(0, startZ) + 420 : 1600;
+  state.playerPos.set(0, startY, startZ);
   state.playerQuat.identity().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), rad(8)));
   const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(state.playerQuat).normalize();
-  state.vel.copy(fwd).multiplyScalar(65);
-  state.vel.y -= 6;
+  state.vel.copy(fwd).multiplyScalar(65); state.vel.y -= 6;
   state.score=0; state.multiplier=1; state.crashed=false;
   crashEl.style.display='none';
 }
@@ -430,21 +414,20 @@ function resize(){ const w=window.innerWidth, h=window.innerHeight; renderer.set
 window.addEventListener('resize', resize); resize();
 
 /* ========= boot ========= */
-generateWorld(state.worldSeed, quality);
+generateWorld(state.worldSeed);
 
 /* ========= loop: arcade aircraft physics ========= */
 function terrainDistanceBelow(pos){ return pos.y - terrainHeightAt(pos.x, pos.z); }
 
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(()=>{
-  const dt = Math.min(0.033, clock.getDelta()); // stable @ ~30–60 FPS
+  const dt = Math.min(0.033, clock.getDelta());
   if (state.paused || state.crashed){ renderer.render(scene,camera); return; }
 
   // controls → orientation
-  const yaw   = ((inputs.a?1:0) - (inputs.d?1:0)) * state.yawRate   * dt; // A left, D right
-  const pitch = ((inputs.s?1:0) - (inputs.w?1:0)) * state.pitchRate * dt; // W nose down, S up
-  const roll  = ((inputs.q?1:0) - (inputs.e?1:0)) * state.rollRate  * dt; // Q left, E right
-
+  const yaw   = ((inputs.a?1:0) - (inputs.d?1:0)) * state.yawRate   * dt;
+  const pitch = ((inputs.s?1:0) - (inputs.w?1:0)) * state.pitchRate * dt;
+  const roll  = ((inputs.q?1:0) - (inputs.e?1:0)) * state.rollRate  * dt;
   const qYaw   = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),  yaw);
   const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),  pitch);
   const qRoll  = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), -roll);
@@ -455,14 +438,12 @@ renderer.setAnimationLoop(()=>{
   const up  = new THREE.Vector3(0,1,0).applyQuaternion(state.playerQuat).normalize();
   const right = new THREE.Vector3(1,0,0).applyQuaternion(state.playerQuat).normalize();
 
-  // airflow & AoA/β
+  // airflow & coefficients
   const spd = state.vel.length();
   const air = spd>1e-4 ? state.vel.clone().multiplyScalar(-1/spd) : fwd.clone().multiplyScalar(-1);
   const f = fwd.dot(air), u = up.dot(air), r = right.dot(air);
   let aoa  = clamp(Math.atan2(u, f), -state.aoaLimit, state.aoaLimit);
   const beta = Math.atan2(r, f);
-
-  // coefficients
   const Cl = state.ClMax * Math.sin(2*aoa);
   const Cd = state.Cd0 + state.CdK*(Cl*Cl) + 0.02*(beta*beta);
   const q   = (spd*spd) * state.qScale;
@@ -472,7 +453,7 @@ renderer.setAnimationLoop(()=>{
   let sideDir = right.clone().sub(air.clone().multiplyScalar(right.dot(air))); const sl = sideDir.length(); if (sl<1e-5) sideDir.copy(right); else sideDir.multiplyScalar(1/sl);
   const dragDir = spd>1e-4 ? state.vel.clone().multiplyScalar(-1/spd) : fwd.clone().multiplyScalar(-1);
 
-  // ground effect boost when low & parallel to terrain
+  // ground effect boost
   const alt = terrainDistanceBelow(state.playerPos);
   const gNorm = terrainNormalAt(state.playerPos.x, state.playerPos.z);
   const parallelFactor = 1 - Math.abs(fwd.dot(gNorm));
@@ -486,7 +467,7 @@ renderer.setAnimationLoop(()=>{
   const sideDamp= sideDir.multiplyScalar(-q * state.sideSlipDamp * beta);
   const thrust  = fwd.clone().multiplyScalar(state.thrustArcade);
 
-  // body-axis alignment damping
+  // alignment damping (arcade stabilizer)
   const vBody = state.vel.clone().applyQuaternion(state.playerQuat.clone().invert());
   const alignBody = new THREE.Vector3(-vBody.x, -vBody.y*0.6, 0).multiplyScalar(state.alignStability);
   const alignWorld = alignBody.applyQuaternion(state.playerQuat);
@@ -507,7 +488,7 @@ renderer.setAnimationLoop(()=>{
   state.playerPos.addScaledVector(state.vel, dt);
 
   // camera
-  const camOffLocal = new THREE.Vector3(0, 4.0, 16.0);
+  const camOffLocal = new THREE.Vector3(0, 4.5, 17.0);
   const camPos = camOffLocal.clone().applyQuaternion(state.playerQuat).add(state.playerPos);
   camera.position.lerp(camPos, 0.16);
   camera.lookAt(state.playerPos.clone().add(fwd.clone().multiplyScalar(32)));
@@ -516,7 +497,7 @@ renderer.setAnimationLoop(()=>{
   glider.position.copy(state.playerPos);
   glider.quaternion.copy(state.playerQuat);
 
-  // ground collision/proximity
+  // ground collision
   const distBelow = alt;
   const nearestDist = distBelow - state.playerRadius;
   if (nearestDist < 0){ doCrash(); renderer.render(scene,camera); return; }
@@ -537,7 +518,7 @@ renderer.setAnimationLoop(()=>{
     if (Math.abs(radial - ringR) < thick*0.7 && dy < thick*0.9) nextSeed();
   }
 
-  // scoring HUD
+  // HUD
   const closeness = clamp(1 - (nearestDist / state.proxThreshold), 0, 1);
   const gain = (4 + spdNew * 0.16) * state.multiplier * (0.25 + closeness * 1.4);
   state.score += gain * dt;

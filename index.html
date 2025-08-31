@@ -2,21 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Superflight (clean-room) — Glide Aero + Craggy Mountains + Nibble Caves</title>
+  <title>Superflight (clean-room) — Glide Aero + Craggy Peaks + Nibble Caves (QA’d)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body { height:100%; margin:0; background:linear-gradient(#a7d3ff,#eaf6ff); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
     #app { position:fixed; inset:0; overflow:hidden; }
-    .hud { position:absolute; top:8px; left:8px; color:#003; background:rgba(255,255,255,.6); padding:8px 10px; border-radius:12px; font-size:13px; line-height:1.15; backdrop-filter:saturate(1.2) blur(2px); }
-    .ret { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); color:#000; opacity:.22; pointer-events:none; }
-    .ret div { background:rgba(0,0,0,.6); border-radius:2px; margin:auto; }
-    .ret .v { width:4px; height:20px; }
-    .ret .h { width:20px; height:4px; margin-top:4px; }
-    .help { position:absolute; right:8px; top:8px; color:#003; background:rgba(255,255,255,.6); padding:8px 10px; border-radius:12px; font-size:12px; max-width:380px; backdrop-filter:saturate(1.2) blur(2px); }
+    .hud { position:absolute; top:8px; left:8px; color:#003; background:rgba(255,255,255,.7); padding:8px 10px; border-radius:12px; font-size:13px; line-height:1.15; backdrop-filter:saturate(1.2) blur(2px); }
+    .ret { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); opacity:.22; pointer-events:none; }
+    .ret .v,.ret .h { background:#000; border-radius:2px; }
+    .ret .v { width:4px; height:20px; margin:auto; }
+    .ret .h { width:20px; height:4px; margin:4px auto 0; }
+    .help { position:absolute; right:8px; top:8px; color:#003; background:rgba(255,255,255,.7); padding:8px 10px; border-radius:12px; font-size:12px; max-width:380px; backdrop-filter:saturate(1.2) blur(2px); }
     .overlay { position:absolute; inset:0; display:none; place-items:center; color:#fff; }
     .overlay .box { background:rgba(0,0,0,.55); padding:16px 20px; border-radius:18px; text-align:center; }
-    .foot { position:absolute; left:50%; bottom:8px; transform:translateX(-50%); color:#003; font-size:11px; background:rgba(255,255,255,.6); padding:4px 8px; border-radius:999px; opacity:.9; }
-    #err { position:fixed; right:8px; bottom:8px; max-width:46ch; background:#220; color:#fee; font:12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding:8px 10px; border-radius:12px; display:none; white-space:pre-wrap; }
+    .foot { position:absolute; left:50%; bottom:8px; transform:translateX(-50%); color:#003; font-size:11px; background:rgba(255,255,255,.7); padding:4px 8px; border-radius:999px; opacity:.9; }
+    #err { position:fixed; right:8px; bottom:8px; max-width:46ch; background:#220; color:#fee; font:12px/1.3 ui-monospace,monospace; padding:8px 10px; border-radius:12px; display:none; white-space:pre-wrap; }
   </style>
 </head>
 <body>
@@ -57,56 +57,32 @@
   </div>
 </div>
 
-<div class="foot">Glide aero (no “current”) · Craggy peaks · Nibble tunnels with cave walls</div>
+<div class="foot">Glide aero (no “current”) · Craggy peaks · Nibbled caves near spawn</div>
 <div id="err"></div>
 
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
-/* ========= math & noise utils ========= */
+/* ========= utils ========= */
 const rad = THREE.MathUtils.degToRad;
 const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
-function mulberry32(seed){ let t=seed>>>0; return ()=>{ t+=0x6D2B79F5; let r=Math.imul(t^(t>>>15),1|t); r^=r+Math.imul(r^(r>>>7),61|r); return ((r^(r>>>14))>>>0)/4294967296; }; }
 const smooth=(t)=>t*t*(3-2*t);
-function makeNoise2D(seed) {
-  const s = seed | 0;
-  function hash(i, j) {
-    let h = ((i|0) * 374761393) ^ ((j|0) * 668265263) ^ (s * 362437);
-    h = (h ^ (h >>> 13)) >>> 0;
-    h = (h * 1274126177) >>> 0;
-    return h / 4294967295;
-  }
-  return (x, z) => {
-    const ix = Math.floor(x), iz = Math.floor(z);
-    const fx = x - ix, fz = z - iz;
-    const u = smooth(fx), v = smooth(fz);
-    const n00 = hash(ix, iz),     n10 = hash(ix + 1, iz);
-    const n01 = hash(ix, iz + 1), n11 = hash(ix + 1, iz + 1);
-    const nx0 = n00 + (n10 - n00) * u;
-    const nx1 = n01 + (n11 - n01) * u;
-    return nx0 + (nx1 - nx0) * v; // 0..1
-  };
+function rng32(seed){ let t=seed>>>0; return ()=>{ t+=0x6D2B79F5; let r=Math.imul(t^(t>>>15),1|t); r^=r+Math.imul(r^(r>>>7),61|r); return ((r^(r>>>14))>>>0)/4294967296; }; }
+function makeNoise2D(seed){ const s=seed|0; function h(i,j){ let x=((i|0)*374761393) ^ ((j|0)*668265263) ^ (s*362437); x=(x^(x>>>13))>>>0; x=(x*1274126177)>>>0; return x/4294967295; }
+  return (x,z)=>{ const ix=Math.floor(x), iz=Math.floor(z); const fx=x-ix, fz=z-iz; const u=smooth(fx), v=smooth(fz);
+    const n00=h(ix,iz), n10=h(ix+1,iz), n01=h(ix,iz+1), n11=h(ix+1,iz+1);
+    const nx0=n00+(n10-n00)*u, nx1=n01+(n11-n01)*u; return nx0+(nx1-nx0)*v; };
 }
-function makeFBM(noise){ 
-  return (x,z,oct=5,pers=0.5,lacun=2)=>{ 
-    let f=1,a=1,acc=0,sum=0;
-    for(let o=0;o<oct;o++){ acc+=a*noise(x*f,z*f); sum+=a; f*=lacun; a*=pers; }
-    return acc/sum;
-  };
-}
+function makeFBM(noise){ return (x,z,oct=5,pers=0.5,lacun=2)=>{ let f=1,a=1,acc=0,sum=0; for(let o=0;o<oct;o++){ acc+=a*noise(x*f,z*f); sum+=a; f*=lacun; a*=pers; } return acc/sum; }; }
 function ridged(n){ return 1 - Math.abs(2*n - 1); }
 
-/* ========= error helper ========= */
+/* ========= error surface ========= */
 const errBox = document.getElementById('err');
-function showError(e){
-  errBox.style.display='block';
-  errBox.textContent = (typeof e === 'string') ? e : (e?.message || String(e));
-  console.error(e);
-}
+function showError(e){ errBox.style.display='block'; errBox.textContent=(typeof e==='string')?e:(e?.message||String(e)); console.error(e); }
 window.addEventListener('error', e=>showError(e.error||e.message));
 window.addEventListener('unhandledrejection', e=>showError(e.reason||e));
 
-/* ========= DOM refs ========= */
+/* ========= DOM ========= */
 const app = document.getElementById('app');
 const uiScore = document.getElementById('uiScore');
 const uiMult  = document.getElementById('uiMult');
@@ -118,34 +94,28 @@ const uiQual  = document.getElementById('uiQual');
 const crashEl = document.getElementById('crash');
 const pausedEl= document.getElementById('paused');
 
-/* ========= three setup ========= */
+/* ========= three ========= */
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(64, 1, 0.1, 40000);
-camera.position.set(0, 1800, 5200);
-
-const fogColor = new THREE.Color('#cfeaff');
-scene.fog = new THREE.Fog(fogColor, 900, 30000);
-
-const hemi = new THREE.HemisphereLight(0xcfeaff, 0xbfa17a, 0.95); hemi.position.set(0,1600,0); scene.add(hemi);
-const dir  = new THREE.DirectionalLight(0xffffff, 0.9); dir.position.set(-1400,2200,1200); scene.add(dir);
-const amb  = new THREE.AmbientLight(0xffffff, 0.22); scene.add(amb);
-
+const camera = new THREE.PerspectiveCamera(64, 1, 0.1, 45000);
+camera.position.set(0, 1500, 4500);
+const fogColor = new THREE.Color('#cfeaff'); scene.fog = new THREE.Fog(fogColor, 700, 28000);
+scene.add(new THREE.HemisphereLight(0xcfeaff, 0xbfa17a, 0.95));
+const sun = new THREE.DirectionalLight(0xffffff, 1.0); sun.position.set(-1400,2200,1200); scene.add(sun);
+scene.add(new THREE.AmbientLight(0xffffff, 0.20));
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-app.appendChild(renderer.domElement);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); renderer.setSize(window.innerWidth, window.innerHeight); app.appendChild(renderer.domElement);
 
 /* ========= input ========= */
 const inputs = { w:false,s:false,a:false,d:false,q:false,e:false };
 function setKey(e, down){
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
   switch(e.code){
-    case 'KeyW': case 'ArrowUp':    inputs.w = down; break; // W = nose down
-    case 'KeyS': case 'ArrowDown':  inputs.s = down; break; // S = nose up
-    case 'KeyA': case 'ArrowLeft':  inputs.a = down; break; // yaw left
-    case 'KeyD': case 'ArrowRight': inputs.d = down; break; // yaw right
-    case 'KeyQ': inputs.q = down; break;                   // roll left
-    case 'KeyE': inputs.e = down; break;                   // roll right
+    case 'KeyW': case 'ArrowUp':    inputs.w=down; break;
+    case 'KeyS': case 'ArrowDown':  inputs.s=down; break;
+    case 'KeyA': case 'ArrowLeft':  inputs.a=down; break;
+    case 'KeyD': case 'ArrowRight': inputs.d=down; break;
+    case 'KeyQ': inputs.q=down; break;
+    case 'KeyE': inputs.e=down; break;
     case 'KeyP': if(down) togglePause(); break;
     case 'KeyR': if(down) restart(); break;
     case 'Digit1': if(down) setQuality('high'); break;
@@ -156,48 +126,39 @@ function setKey(e, down){
 window.addEventListener('keydown', e=>setKey(e,true), {passive:false});
 window.addEventListener('keyup',   e=>setKey(e,false), {passive:false});
 
-/* ========= physics & player ========= */
+/* ========= player/physics ========= */
 const state = {
-  playerPos: new THREE.Vector3(0,1800,5200),
+  playerPos: new THREE.Vector3(0,1500,4500),
   playerQuat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), rad(6)),
   playerRadius: 1.1,
   vel: new THREE.Vector3(0,-10,-60),
 
-  // Glide-centric arcade aero (no “current”)
+  // Glide-centric arcade aero
   gravity: 9.0,
-  qScale: 0.020,     // dynamic pressure scale ~ v^2
-  liftScale: 0.20,   // lift strength
-  dragScale: 0.016,  // drag strength (lower = retains energy)
-  Cd0: 0.012,        // parasitic drag
-  CdK: 0.030,        // induced drag factor
-  ClMax: 1.8,        // peak lift
-  aoaLimit: rad(32), // AoA clamp (gentle stall)
-  sideSlipDamp: 0.6, // smaller → freer slides
-  alignStability: 0.12, // tiny stabilizer (no heavy auto-align)
-  thrustArcade: 2.0,    // small baseline thrust to keep fun aerobatics
-  groundEffectH: 150,
-  groundEffectStrength: 0.6,
+  qScale: 0.020, liftScale: 0.20, dragScale: 0.016,
+  Cd0: 0.012, CdK: 0.030, ClMax: 1.8, aoaLimit: rad(32),
+  sideSlipDamp: 0.5, alignStability: 0.10, thrustArcade: 1.6,
+  groundEffectH: 150, groundEffectStrength: 0.6,
 
   maxSpeed: 190,
 
   yawRate:   rad(95),
-  pitchRate: rad(80),
-  rollRate:  rad(160),
+  pitchRate: rad(82),
+  rollRate:  rad(165),
 
   score:0, multiplier:1, maxMultiplier:12, proxThreshold:16,
   crashed:false, paused:false,
   worldSeed: Math.floor(Math.random()*1e9), difficulty:1, highScore:0,
 };
 
-let quality = 'high';
-uiQual.textContent = 'High';
+let quality = 'high'; uiQual.textContent='High';
 
 /* ========= glider + shadow ========= */
 function buildGlider(){
   const g = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.ConeGeometry(0.7,2.4,8), new THREE.MeshStandardMaterial({color:0xffffff, roughness:.4, metalness:.1}));
+  const body = new THREE.Mesh(new THREE.ConeGeometry(0.75,2.6,8), new THREE.MeshStandardMaterial({color:0xffffff, roughness:.4, metalness:.1}));
   body.rotation.x = Math.PI/2; g.add(body);
-  const wing = new THREE.Mesh(new THREE.BoxGeometry(4.4,.10,.7), new THREE.MeshStandardMaterial({color:0x87ceeb, roughness:.6}));
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(4.6,.10,.7), new THREE.MeshStandardMaterial({color:0x87ceeb, roughness:.6}));
   wing.position.set(0,0,-.1); g.add(wing);
   const tail = new THREE.Mesh(new THREE.BoxGeometry(1.2,.08,.6), new THREE.MeshStandardMaterial({color:0x87ceeb, roughness:.6}));
   tail.position.set(0,-.25,.5); tail.rotation.z = rad(14); g.add(tail);
@@ -205,58 +166,37 @@ function buildGlider(){
 }
 const glider = buildGlider(); scene.add(glider);
 
-function makeShadowTexture(){
-  const s=64, cnv=document.createElement('canvas'); cnv.width=cnv.height=s;
-  const ctx=cnv.getContext('2d'); const g=ctx.createRadialGradient(s/2,s/2,8, s/2,s/2,s/2);
-  g.addColorStop(0,'rgba(0,0,0,0.35)'); g.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(s/2,s/2,s/2,0,Math.PI*2); ctx.fill();
-  const tex=new THREE.CanvasTexture(cnv); tex.anisotropy=4; return tex;
-}
-const shadowSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeShadowTexture(), transparent:true, depthWrite:false, opacity:.8 }));
+// soft blob shadow for depth cues
+function makeShadowTexture(){ const s=64, c=document.createElement('canvas'); c.width=c.height=s; const x=c.getContext('2d');
+  const g=x.createRadialGradient(s/2,s/2,8, s/2,s/2,s/2); g.addColorStop(0,'rgba(0,0,0,0.35)'); g.addColorStop(1,'rgba(0,0,0,0)');
+  x.fillStyle=g; x.beginPath(); x.arc(s/2,s/2,s/2,0,Math.PI*2); x.fill(); const tex=new THREE.CanvasTexture(c); tex.anisotropy=4; return tex; }
+const shadowSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeShadowTexture(), transparent:true, depthWrite:false, opacity:.85 }));
 shadowSprite.renderOrder = -1; scene.add(shadowSprite);
 
-/* ========= terrain + nibble caves ========= */
-let terrain = null; // { group, params, heightAt, portal, mat }
-let portalMesh = null;
+/* ========= terrain + caves ========= */
+let terrain=null, portalMesh=null;
+const NIBBLE_MAX=64;
+const nibbleData={ count:0, spheres:new Array(NIBBLE_MAX).fill(0).map(()=>new THREE.Vector4()), walls:null };
 
-const NIBBLE_MAX = 64;
-const nibbleData = {
-  count: 0,
-  spheres: new Array(NIBBLE_MAX).fill(0).map(()=>new THREE.Vector4(0,0,0,0)), // vec4(x,y,z,r)
-  walls: null, // InstancedMesh for cave interior
-};
-
-function makeCloudTexture(){
-  const s=128, cnv=document.createElement('canvas'); cnv.width=cnv.height=s;
-  const ctx=cnv.getContext('2d');
-  const g=ctx.createRadialGradient(s/2,s/2,12, s/2,s/2,s/2);
-  g.addColorStop(0,'rgba(255,255,255,0.9)');
-  g.addColorStop(1,'rgba(255,255,255,0.0)');
-  ctx.fillStyle=g; ctx.fillRect(0,0,s, s);
-  const tex = new THREE.CanvasTexture(cnv); tex.anisotropy = 4; return tex;
-}
+function makeCloudTexture(){ const s=128,c=document.createElement('canvas'); c.width=c.height=s; const x=c.getContext('2d');
+  const g=x.createRadialGradient(s/2,s/2,12, s/2,s/2,s/2); g.addColorStop(0,'rgba(255,255,255,0.9)'); g.addColorStop(1,'rgba(255,255,255,0)');
+  x.fillStyle=g; x.fillRect(0,0,s,s); const tex=new THREE.CanvasTexture(c); tex.anisotropy=4; return tex; }
 function buildCloudLayer(seed, params){
-  const tex = makeCloudTexture();
-  const grp = new THREE.Group();
-  const count = quality==='ultra' ? 240 : 180;
-  for(let i=0;i<count;i++){
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent:true, depthWrite:false, opacity: 0.24 + Math.random()*0.36 }));
-    sp.position.set((Math.random()-0.5)*params.width*1.3, 2000 + (Math.random()-0.5)*160, (Math.random()-0.25)*params.length);
-    const s = (quality==='ultra' ? 160 : 130) + Math.random()*200;
-    sp.scale.set(s, s, 1);
-    grp.add(sp);
-  }
+  const tex = makeCloudTexture(); const grp=new THREE.Group(); const n=(quality==='ultra')?240:180;
+  for(let i=0;i<n;i++){ const sp=new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true, depthWrite:false, opacity:0.24+Math.random()*0.36 }));
+    sp.position.set((Math.random()-0.5)*params.width*1.3, 2000+(Math.random()-0.5)*160, (Math.random()-0.25)*params.length);
+    const s=(quality==='ultra'?160:130)+Math.random()*200; sp.scale.set(s,s,1); grp.add(sp); }
   return grp;
 }
 
 function makeHeightFn(seed, params){
   const noise = makeNoise2D(seed ^ 0x9e3779b9);
-  const fbm   = makeFBM(noise);
+  const fbm = makeFBM(noise);
   const nx=params.nx, nz=params.nz;
   return (x,z)=>{
     const n1 = fbm(x*nx, z*nz, 7, 0.55, 2.05);
     const n2 = ridged(fbm(x*nx*0.6, z*nz*0.6, 6, 0.5, 2.0));
-    const n3 = fbm(x*nx*5.5, z*nz*5.5, 3, 0.5, 2.0);
+    const n3 = fbm(x*nx*5.8, z*nz*5.8, 3, 0.5, 2.0);
     const base = (1-params.ridgeMix)*n1 + params.ridgeMix*n2;
     const peaky = 1 - Math.pow(1 - base, params.peakSharp);
     const shaped = clamp(peaky + (n3-0.5)*params.microAmp, 0, 1);
@@ -271,367 +211,279 @@ function applyNibbleShader(mat){
   mat.onBeforeCompile = (shader)=>{
     shader.uniforms.nibbleCount = { value: nibbleData.count };
     shader.uniforms.nibbleSpheres = { value: nibbleData.spheres };
-
-    shader.vertexShader = `
-      varying vec3 vWorldPos;
-    ` + shader.vertexShader.replace(
-      '#include <worldpos_vertex>',
-      `
-      #include <worldpos_vertex>
-      vWorldPos = worldPosition.xyz;
-      `
-    );
-
-    shader.fragmentShader = `
-      uniform int nibbleCount;
-      uniform vec4 nibbleSpheres[NIBBLE_MAX];
-      varying vec3 vWorldPos;
-    ` + shader.fragmentShader.replace(
-      '#include <clipping_planes_fragment>',
-      `
-      #include <clipping_planes_fragment>
-      // Nibble discard: remove terrain where inside any cave sphere
-      for (int i=0; i<NIBBLE_MAX; i++) {
-        if (i >= nibbleCount) break;
-        vec3 C = nibbleSpheres[i].xyz;
-        float R = nibbleSpheres[i].w;
-        if (distance(vWorldPos, C) < R) {
-          discard;
+    shader.vertexShader =
+      `varying vec3 vWorldPos;` +
+      shader.vertexShader.replace('#include <worldpos_vertex>', `#include <worldpos_vertex>\n vWorldPos = worldPosition.xyz;`);
+    shader.fragmentShader =
+      `uniform int nibbleCount; uniform vec4 nibbleSpheres[NIBBLE_MAX]; varying vec3 vWorldPos;` +
+      shader.fragmentShader.replace('#include <clipping_planes_fragment>', `
+        #include <clipping_planes_fragment>
+        for (int i=0; i<NIBBLE_MAX; i++){
+          if (i >= nibbleCount) break;
+          vec3 C = nibbleSpheres[i].xyz; float R = nibbleSpheres[i].w;
+          if (distance(vWorldPos, C) < R) discard;
         }
-      }
-      `
-    );
-    // keep reference so we can update uniforms later
+      `);
     mat.userData.shader = shader;
   };
   mat.needsUpdate = true;
 }
-
-function updateNibbleUniforms(){
-  const shader = terrain?.mat?.userData?.shader;
-  if (shader) {
-    shader.uniforms.nibbleCount.value = nibbleData.count;
-    shader.uniforms.nibbleSpheres.value = nibbleData.spheres;
-  }
-}
-
-function generateNibbles(seed, params, heightAt){
-  // Create 2–3 tunnel paths across high mountains
-  const rng = mulberry32(seed ^ 0xBEEFCAFE);
-  const tunnels = Math.floor(2 + rng()*2); // 2 or 3
-  const spheres = [];
-  const mapW = params.width, mapL = params.length;
-
-  for (let t=0; t<tunnels; t++){
-    // pick a central band along -Z
-    const zMid = -mapL* (0.18 + rng()*0.18);         // between -18%..-36% of length
-    const zSpan= 1200 + rng()*1600;                  // tunnel length
-    const zStart = zMid + zSpan*0.5, zEnd = zMid - zSpan*0.5;
-    const xMid = (rng()*2-1) * mapW*0.18;            // near center
-    const xAmp = 200 + rng()*300;                    // lateral wiggle
-    const phase = rng()*Math.PI*2;
-
-    const steps = 28; // keep under NIBBLE_MAX total
-    for (let i=0;i<steps;i++){
-      const s = i/(steps-1);
-      const z = THREE.MathUtils.lerp(zStart, zEnd, s);
-      const x = xMid + Math.sin(s*3.2 + phase) * xAmp + (rng()*2-1)*60;
-      const ySurf = heightAt(x,z);
-      // require a tall mountain here to host a tunnel
-      if (ySurf < params.base + params.amp*0.55) continue;
-
-      const depth = 28 + rng()*90; // how deep below surface
-      const y = ySurf - depth;
-
-      // radius taper near ends → nicer mouths
-      let r = (quality==='ultra' ? 42 : 36) + rng()*10;
-      const mouthTaper = 0.55 - Math.abs(s-0.5); // 0..0.55..0
-      r *= 0.75 + mouthTaper*0.5;                // bigger near middle
-      spheres.push(new THREE.Vector4(x,y,z, r));
-      if (spheres.length >= NIBBLE_MAX) break;
-    }
-    if (spheres.length >= NIBBLE_MAX) break;
-  }
-
-  // Copy into uniform array
-  nibbleData.count = Math.min(NIBBLE_MAX, spheres.length);
-  for (let i=0;i<NIBBLE_MAX;i++){
-    if (i<nibbleData.count) {
-      nibbleData.spheres[i].set(spheres[i].x, spheres[i].y, spheres[i].z, spheres[i].w);
-    } else {
-      nibbleData.spheres[i].set(0,0,0,0);
-    }
-  }
-
-  // Build interior cave walls as inverted spheres (instanced)
-  if (nibbleData.walls){ scene.remove(nibbleData.walls); nibbleData.walls.geometry.dispose(); nibbleData.walls.material.dispose(); nibbleData.walls=null; }
-  if (nibbleData.count>0){
-    const geo = new THREE.SphereGeometry(1, 20, 14);
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x6c4e3d, roughness: 0.95, metalness: 0.02, side: THREE.BackSide,
-    });
-    const inst = new THREE.InstancedMesh(geo, mat, nibbleData.count);
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3();
-    for (let i=0;i<nibbleData.count;i++){
-      const v = nibbleData.spheres[i];
-      m.compose(new THREE.Vector3(v.x,v.y,v.z), q.identity(), s.set(v.w, v.w, v.w));
-      inst.setMatrixAt(i, m);
-    }
-    inst.instanceMatrix.needsUpdate = true;
-    nibbleData.walls = inst;
-    scene.add(inst);
-  }
-}
+function updateNibbleUniforms(){ const s=terrain?.mat?.userData?.shader; if (s){ s.uniforms.nibbleCount.value=nibbleData.count; s.uniforms.nibbleSpheres.value=nibbleData.spheres; } }
 
 function buildTerrain(seed){
-  const isUltra = quality==='ultra';
-  // big, tall, craggy
+  const isUltra=(quality==='ultra');
   const params = isUltra ? {
-    width:  7200, length: 28000,
-    amp: 3200, base: -160, slope: 0.022,
-    nx: 0.00115, nz: 0.00115, ridgeMix: 0.86, microAmp: 0.22, peakSharp: 4.0,
-    tilesX: 8, tilesZ: 22, tileSeg: 64, // ~720k verts
+    width:7200, length:28000, amp:3300, base:-160, slope:0.022,
+    nx:0.00115, nz:0.00115, ridgeMix:0.86, microAmp:0.22, peakSharp:4.0,
+    tilesX:8, tilesZ:22, tileSeg:64
   } : {
-    width:  5200, length: 20000,
-    amp: 2200, base: -130, slope: 0.021,
-    nx: 0.00125, nz: 0.00125, ridgeMix: 0.82, microAmp: 0.18, peakSharp: 3.0,
-    tilesX: 6, tilesZ: 16, tileSeg: 56, // ~300k verts
+    width:5200, length:20000, amp:2300, base:-130, slope:0.021,
+    nx:0.00125, nz:0.00125, ridgeMix:0.82, microAmp:0.18, peakSharp:3.0,
+    tilesX:6, tilesZ:16, tileSeg:56
   };
 
   const heightAt = makeHeightFn(seed, params);
 
   const group = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({ vertexColors:true, flatShading:false, roughness:0.95, metalness:0.02 });
-  applyNibbleShader(mat); // add nibble discard
+  applyNibbleShader(mat);
 
-  const startX = -params.width/2, startZ = -params.length/2;
-  const tileW = params.width / params.tilesX;
-  const tileL = params.length / params.tilesZ;
+  const startX=-params.width/2, startZ=-params.length/2;
+  const tileW=params.width/params.tilesX, tileL=params.length/params.tilesZ;
 
   for (let tz=0; tz<params.tilesZ; tz++){
     for (let tx=0; tx<params.tilesX; tx++){
       const geo = new THREE.PlaneGeometry(tileW, tileL, params.tileSeg, params.tileSeg);
       geo.rotateX(-Math.PI/2);
-      const pos = geo.attributes.position;
-      const vcount = pos.count;
-      const colors = new Float32Array(vcount*3);
+      const pos=geo.attributes.position, vcount=pos.count;
+      const colors=new Float32Array(vcount*3);
 
-      const ox = startX + tileW*(tx+0.5);
-      const oz = startZ + tileL*(tz+0.5);
+      const ox = startX + tileW*(tx+0.5), oz = startZ + tileL*(tz+0.5);
 
       let i=0;
-      for(let v=0; v<vcount; v++){
-        const lx = pos.getX(v), lz = pos.getZ(v);
-        const wx = ox + lx, wz = oz + lz;
+      for (let v=0; v<vcount; v++){
+        const lx=pos.getX(v), lz=pos.getZ(v);
+        const wx=ox+lx, wz=oz+lz;
         const y = heightAt(wx,wz);
-        pos.setY(v, y);
+        pos.setY(v,y);
 
-        // color by altitude + subtle contour
+        // altitude-based vertex colors with contour banding
         const t = clamp((y - (params.base-160)) / (params.amp+700), 0, 1);
-        const rockLo = new THREE.Color('#cda077');
-        const rockHi = new THREE.Color('#8d6442');
-        const grass  = new THREE.Color('#9ecb7a');
-        const snow   = new THREE.Color('#f5f7fb');
-        const c = new THREE.Color();
-        if (t < 0.45) c.lerpColors(rockLo, rockHi, t/0.45);
-        else if (t < 0.80) c.lerpColors(rockHi, grass, (t-0.45)/0.35);
+        const rockLo=new THREE.Color('#cda077'), rockHi=new THREE.Color('#8d6442'), grass=new THREE.Color('#9ecb7a'), snow=new THREE.Color('#f5f7fb');
+        const c=new THREE.Color();
+        if (t<0.45) c.lerpColors(rockLo, rockHi, t/0.45);
+        else if (t<0.80) c.lerpColors(rockHi, grass, (t-0.45)/0.35);
         else c.lerpColors(grass, snow, (t-0.80)/0.20);
-        const band = ((Math.floor((y+140)/60)%2) ? 0.95 : 1.05);
-        c.multiplyScalar(band);
+        c.multiplyScalar((Math.floor((y+140)/60)%2)?0.95:1.05);
         colors[i++]=c.r; colors[i++]=c.g; colors[i++]=c.b;
       }
       geo.setAttribute('color', new THREE.BufferAttribute(colors,3));
       geo.computeVertexNormals();
 
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(ox, 0, oz);
-      group.add(mesh);
+      mesh.position.set(ox,0,oz); group.add(mesh);
     }
   }
 
-  // clouds
   group.add(buildCloudLayer(seed, params));
 
-  // portal near far end
-  const portalZ = -params.length/2 + 280;
-  const portalY = heightAt(0, portalZ) + (isUltra? 120 : 100);
-  const ringR= isUltra? 26 : 24, ringT= isUltra? 3.0 : 2.6;
-  const portalMat = new THREE.MeshStandardMaterial({ color: 0x7aa2ff, emissive: new THREE.Color(0x7aa2ff).multiplyScalar(.6), roughness:.2, metalness:0.0 });
-  const portalMeshLocal = new THREE.Mesh(new THREE.TorusGeometry(ringR, ringT, 18, 84), portalMat);
-  portalMeshLocal.position.set(0, portalY, portalZ);
-  portalMeshLocal.userData.center = portalMeshLocal.position.clone();
-  portalMeshLocal.userData.ringR = ringR;
-  portalMeshLocal.userData.thickness = ringT;
-  group.add(portalMeshLocal);
-
   scene.add(group);
-
-  // Bake caves after terrain exists (so uniforms attach)
-  generateNibbles(seed, params, heightAt);
-  updateNibbleUniforms();
-
-  return { group, params, heightAt, portal: portalMeshLocal, mat };
+  return { group, params, heightAt, mat };
 }
 
-function terrainHeightAt(x,z){ return terrain.heightAt(x,z); }
-function terrainNormalAt(x,z){
-  const e=6, hL=terrainHeightAt(x-e,z), hR=terrainHeightAt(x+e,z), hD=terrainHeightAt(x,z-e), hU=terrainHeightAt(x,z+e);
-  const n = new THREE.Vector3(-(hR-hL)/(2*e), 1, -(hU-hD)/(2*e)); return n.normalize();
+/* ——— Smart spawn so mountains are RIGHT THERE ——— */
+function pickSpawn(params, heightAt){
+  // try several z-bands near the “top” so you look into mountains immediately
+  const candidates=[];
+  const xs = [0, -300, 300, -600, 600];
+  for (const z of [params.length*0.38, params.length*0.34, params.length*0.30, params.length*0.26]){
+    for (const x of xs){
+      const y0 = heightAt(x, z);
+      const yAhead = heightAt(x, z-800);
+      const relief = Math.abs(yAhead - y0);
+      const tall = y0 - (params.base) ; // how high above base
+      candidates.push({ x, z, y:y0, score: relief*0.7 + tall*0.3 });
+    }
+  }
+  candidates.sort((a,b)=>b.score-a.score);
+  const best = candidates[0] || {x:0,z:params.length*0.34,y:heightAt(0, params.length*0.34)};
+  const spawn = { x: best.x, z: best.z, y: best.y + 250 }; // ~250m AGL
+  const lookDir = new THREE.Vector3(0,0,-1); // face -Z
+  return { spawn, lookDir };
 }
 
-/* ========= world mgmt ========= */
+/* ——— Nibble tunnels: place one near spawn + one further ——— */
+function generateNibbles(seed, params, heightAt, anchorZ){
+  const rng = rng32(seed ^ 0xBEEFCAFE);
+  const spheres=[];
+  const plan = [
+    { zMid: anchorZ - 1400, zSpan: 1400 }, // near spawn
+    { zMid: -params.length*0.22, zSpan: 1800 } // deeper in map
+  ];
+  for (const seg of plan){
+    const zStart = seg.zMid + seg.zSpan*0.5, zEnd = seg.zMid - seg.zSpan*0.5;
+    const xMid = (rng()*2-1) * params.width*0.15;
+    const xAmp = 220 + rng()*320;
+    const phase = rng()*Math.PI*2;
+    const steps = 26;
+    for (let i=0;i<steps;i++){
+      const s = i/(steps-1);
+      const z = THREE.MathUtils.lerp(zStart, zEnd, s);
+      const x = xMid + Math.sin(s*3.2 + phase) * xAmp + (rng()*2-1)*60;
+      const ySurf = heightAt(x,z);
+      if (ySurf < params.base + params.amp*0.55) continue; // need mountain
+      const depth = 30 + rng()*90;
+      const y = ySurf - depth;
+      let r = (quality==='ultra' ? 46 : 40) + rng()*10;
+      const mouth = 0.55 - Math.abs(s-0.5);
+      r *= 0.75 + mouth*0.5;
+      spheres.push(new THREE.Vector4(x,y,z,r));
+      if (spheres.length >= NIBBLE_MAX) break;
+    }
+    if (spheres.length >= NIBBLE_MAX) break;
+  }
+
+  nibbleData.count = Math.min(NIBBLE_MAX, spheres.length);
+  for (let i=0;i<NIBBLE_MAX;i++){
+    if (i<nibbleData.count) nibbleData.spheres[i].copy(spheres[i]);
+    else nibbleData.spheres[i].set(0,0,0,0);
+  }
+
+  // cave walls (inverted spheres)
+  if (nibbleData.walls){ scene.remove(nibbleData.walls); nibbleData.walls.geometry.dispose(); nibbleData.walls.material.dispose(); nibbleData.walls=null; }
+  if (nibbleData.count>0){
+    const geo = new THREE.SphereGeometry(1, 22, 16);
+    const mat = new THREE.MeshStandardMaterial({ color:0x6c4e3d, roughness:0.95, metalness:0.02, side:THREE.BackSide });
+    const inst = new THREE.InstancedMesh(geo, mat, nibbleData.count);
+    const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), S = new THREE.Vector3();
+    for (let i=0;i<nibbleData.count;i++){ const v=nibbleData.spheres[i]; M.compose(new THREE.Vector3(v.x,v.y,v.z), Q.identity(), S.set(v.w,v.w,v.w)); inst.setMatrixAt(i,M); }
+    inst.instanceMatrix.needsUpdate=true; nibbleData.walls=inst; scene.add(inst);
+  }
+}
+
+/* ========== build world ========== */
 function disposeWorld(){
   if (!terrain) return;
   if (nibbleData.walls){ scene.remove(nibbleData.walls); nibbleData.walls.geometry.dispose(); nibbleData.walls.material.dispose(); nibbleData.walls=null; }
   scene.remove(terrain.group);
-  terrain.group.traverse(o=>{ 
-    if (o.isMesh){ o.geometry?.dispose?.(); /* don't dispose shared mat here */ }
-    if (o.isSprite){ o.material?.map?.dispose?.(); o.material?.dispose?.(); }
-  });
-  // dispose material once
+  terrain.group.traverse(o=>{ if (o.isMesh){ o.geometry?.dispose?.(); } if (o.isSprite){ o.material?.map?.dispose?.(); o.material?.dispose?.(); } });
   terrain.mat?.dispose?.();
-  portalMesh = null;
-  terrain = null;
+  terrain=null; portalMesh=null;
 }
+
 function generateWorld(seed){
-  const start = performance.now();
+  const t0=performance.now();
   disposeWorld();
   terrain = buildTerrain(seed);
-  portalMesh = terrain.portal;
-  uiSeed.textContent = seed;
+  // smart spawn
+  const pick = pickSpawn(terrain.params, terrain.heightAt);
+  const start = pick.spawn; // {x,y,z}
+  // carve caves with an anchor near spawn so you can test immediately
+  generateNibbles(seed, terrain.params, terrain.heightAt, start.z);
+  updateNibbleUniforms();
 
-  const startZ = terrain.params.length * 0.42;
-  const groundY = terrainHeightAt(0, startZ);
-  const startY = groundY + 520;
-  state.playerPos.set(0, startY, startZ);
+  // put player above ground, looking down the run
+  state.playerPos.set(start.x, start.y, start.z);
   state.playerQuat.identity().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), rad(6)));
   const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(state.playerQuat).normalize();
-  state.vel.copy(fwd).multiplyScalar(70); state.vel.y -= 6;
+  state.vel.copy(fwd).multiplyScalar(72); state.vel.y -= 6;
 
-  const t = performance.now() - start;
-  if (quality==='ultra' && t > 3000){
-    showError(`Ultra build took ${t.toFixed(0)}ms → switching to High`);
-    setQuality('high');
-  }
-}
-function setQuality(q){
-  quality = q;
-  uiQual.textContent = (q==='ultra') ? 'Ultra' : 'High';
-  generateWorld(state.worldSeed);
-}
-function nextSeed(){
-  state.worldSeed = (state.worldSeed * 1664525 + 1013904223) >>> 0;
-  state.difficulty += 1;
-  generateWorld(state.worldSeed);
+  uiSeed.textContent=seed;
+  const buildMs=performance.now()-t0;
+  if (quality==='ultra' && buildMs>3000){ showError(`Ultra build took ${buildMs.toFixed(0)} ms → switching to High`); setQuality('high'); }
 }
 
-/* ========= pause/restart ========= */
+function setQuality(q){ quality=q; uiQual.textContent=(q==='ultra')?'Ultra':'High'; generateWorld(state.worldSeed); }
+function nextSeed(){ state.worldSeed = (state.worldSeed*1664525 + 1013904223) >>> 0; state.difficulty += 1; generateWorld(state.worldSeed); }
+
+/* ========= pause / restart ========= */
 function togglePause(){ state.paused=!state.paused; pausedEl.style.display = state.paused ? 'grid' : 'none'; }
-function doCrash(){ state.crashed=true; crashEl.style.display='grid'; state.highScore = Math.max(state.highScore, state.score|0); document.getElementById('uiHi').textContent = state.highScore.toFixed(0); }
+function doCrash(){ state.crashed=true; crashEl.style.display='grid'; state.highScore=Math.max(state.highScore, state.score|0); document.getElementById('uiHi').textContent=state.highScore.toFixed(0); }
 function restart(){
-  const startZ = terrain ? terrain.params.length * 0.42 : 5200;
-  const groundY = terrain ? terrainHeightAt(0, startZ) : 0;
-  const startY = groundY + 520;
-  state.playerPos.set(0, startY, startZ);
+  // re-pick a fresh spawn in the same world (still smart, so you’re near peaks)
+  const pick = pickSpawn(terrain.params, terrain.heightAt);
+  const start = pick.spawn;
+  state.playerPos.set(start.x, start.y, start.z);
   state.playerQuat.identity().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), rad(6)));
   const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(state.playerQuat).normalize();
-  state.vel.copy(fwd).multiplyScalar(70); state.vel.y -= 6;
-  state.score=0; state.multiplier=1; state.crashed=false;
-  crashEl.style.display='none';
+  state.vel.copy(fwd).multiplyScalar(72); state.vel.y -= 6;
+  state.score=0; state.multiplier=1; state.crashed=false; crashEl.style.display='none';
 }
 
-/* ========= layout ========= */
-function resize(){ const w=window.innerWidth, h=window.innerHeight; renderer.setSize(w,h); camera.aspect=w/h; camera.updateProjectionMatrix(); }
-window.addEventListener('resize', resize); resize();
+/* ========= helpers ========= */
+function terrainHeightAt(x,z){ return terrain.heightAt(x,z); }
+function terrainNormalAt(x,z){ const e=6, hL=terrainHeightAt(x-e,z), hR=terrainHeightAt(x+e,z), hD=terrainHeightAt(x,z-e), hU=terrainHeightAt(x,z+e);
+  return new THREE.Vector3(-(hR-hL)/(2*e), 1, -(hU-hD)/(2*e)).normalize(); }
+
+function pointInAnyNibble(p){ for (let i=0;i<nibbleData.count;i++){ const v=nibbleData.spheres[i]; const dx=p.x-v.x, dy=p.y-v.y, dz=p.z-v.z; if (dx*dx+dy*dy+dz*dz < v.w*v.w) return i; } return -1; }
+function caveWallDistance(p, idx){ const v=nibbleData.spheres[idx]; const d=Math.hypot(p.x-v.x,p.y-v.y,p.z-v.z); return v.w - d; }
+function terrainDistanceBelow(pos){
+  const insideIdx = pointInAnyNibble(pos);
+  if (insideIdx>=0) return caveWallDistance(pos, insideIdx);
+  return pos.y - terrainHeightAt(pos.x, pos.z);
+}
 
 /* ========= boot ========= */
 generateWorld(state.worldSeed);
 
-/* ========= helpers for caves & distance ========= */
-function pointInAnyNibble(p){
-  for (let i=0;i<nibbleData.count;i++){
-    const v = nibbleData.spheres[i];
-    const dx=p.x-v.x, dy=p.y-v.y, dz=p.z-v.z;
-    if ((dx*dx+dy*dy+dz*dz) < v.w*v.w) return i;
-  }
-  return -1;
-}
-function caveWallDistance(p, idx){
-  // distance to sphere surface if inside that sphere
-  const v = nibbleData.spheres[idx];
-  const d = Math.sqrt((p.x-v.x)**2 + (p.y-v.y)**2 + (p.z-v.z)**2);
-  return v.w - d; // >0 means how far from wall (clearance)
-}
-
-/* ========= loop: glide aero ========= */
-function terrainDistanceBelow(pos){
-  // distance to the nearest “solid” surface in the simple model:
-  // If inside a cave sphere → clearance to its wall.
-  // Else → vertical clearance above ground.
-  const insideIdx = pointInAnyNibble(pos);
-  if (insideIdx >= 0){
-    return caveWallDistance(pos, insideIdx);
-  }
-  const dGround = pos.y - terrainHeightAt(pos.x, pos.z);
-  return dGround;
-}
+/* ========= loop ========= */
+function resize(){ const w=window.innerWidth, h=window.innerHeight; renderer.setSize(w,h); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+window.addEventListener('resize', resize); resize();
 
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(()=>{
   const dt = Math.min(0.033, clock.getDelta());
   if (state.paused || state.crashed){ renderer.render(scene,camera); return; }
 
-  // controls → orientation (bank/pull/yaw)
+  // INPUT → ORIENTATION
   const yaw   = ((inputs.a?1:0) - (inputs.d?1:0)) * state.yawRate   * dt;
   const pitch = ((inputs.s?1:0) - (inputs.w?1:0)) * state.pitchRate * dt;
   const roll  = ((inputs.q?1:0) - (inputs.e?1:0)) * state.rollRate  * dt;
-  const qYaw   = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),  yaw);
-  const qPitch = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),  pitch);
-  const qRoll  = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), -roll);
-  state.playerQuat.multiply(qYaw).multiply(qPitch).multiply(qRoll).normalize();
+  state.playerQuat.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),  yaw))
+                  .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0),  pitch))
+                  .multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), -roll))
+                  .normalize();
 
-  // body axes
-  const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(state.playerQuat).normalize();
-  const up  = new THREE.Vector3(0,1,0).applyQuaternion(state.playerQuat).normalize();
-  const right = new THREE.Vector3(1,0,0).applyQuaternion(state.playerQuat).normalize();
+  // BODY AXES
+  const fwd=new THREE.Vector3(0,0,-1).applyQuaternion(state.playerQuat).normalize();
+  const up =new THREE.Vector3(0,1,0).applyQuaternion(state.playerQuat).normalize();
+  const right=new THREE.Vector3(1,0,0).applyQuaternion(state.playerQuat).normalize();
 
-  // airflow & coefficients
-  const spd = state.vel.length();
-  const air = spd>1e-4 ? state.vel.clone().multiplyScalar(-1/spd) : fwd.clone().multiplyScalar(-1);
-  const f = fwd.dot(air), u = up.dot(air), r = right.dot(air);
-  let aoa  = clamp(Math.atan2(u, f), -state.aoaLimit, state.aoaLimit);
-  const beta = Math.atan2(r, f);
-
-  // Lift/drag curves (smooth, low-drag glide)
+  // AIRFLOW / COEFS
+  const spd=Math.max(0.001, state.vel.length());
+  const air = state.vel.clone().multiplyScalar(-1/spd);
+  const f=fwd.dot(air), u=up.dot(air), r=right.dot(air);
+  let aoa=clamp(Math.atan2(u,f), -state.aoaLimit, state.aoaLimit);
+  const beta=Math.atan2(r,f);
   const Cl = state.ClMax * Math.sin(2*aoa);
   const Cd = state.Cd0 + state.CdK*(Cl*Cl) + 0.015*(beta*beta);
-  const q   = (spd*spd) * state.qScale;
+  const q = (spd*spd) * state.qScale;
 
-  // directions
-  let liftDir = up.clone().sub(air.clone().multiplyScalar(up.dot(air))); const ll = liftDir.length(); if (ll<1e-5) liftDir.copy(up); else liftDir.multiplyScalar(1/ll);
-  let sideDir = right.clone().sub(air.clone().multiplyScalar(right.dot(air))); const sl = sideDir.length(); if (sl<1e-5) sideDir.copy(right); else sideDir.multiplyScalar(1/sl);
-  const dragDir = spd>1e-4 ? state.vel.clone().multiplyScalar(-1/spd) : fwd.clone().multiplyScalar(-1);
+  // DIRECTIONS
+  let liftDir = up.clone().sub(air.clone().multiplyScalar(up.dot(air))); const ll=liftDir.length(); if (ll<1e-5) liftDir.copy(up); else liftDir.multiplyScalar(1/ll);
+  let sideDir = right.clone().sub(air.clone().multiplyScalar(right.dot(air))); const sl=sideDir.length(); if (sl<1e-5) sideDir.copy(right); else sideDir.multiplyScalar(1/sl);
+  const dragDir = state.vel.clone().multiplyScalar(-1/spd);
 
-  // ground effect → longer level glide near parallel to ground
+  // GROUND EFFECT
   const alt = terrainDistanceBelow(state.playerPos);
   const gNorm = terrainNormalAt(state.playerPos.x, state.playerPos.z);
   const parallelFactor = 1 - Math.abs(fwd.dot(gNorm));
   const geAlt = clamp(1 - Math.max(0, alt) / state.groundEffectH, 0, 1);
   const groundEffect = 1 + state.groundEffectStrength * geAlt * Math.pow(parallelFactor, 1.2);
 
-  // forces
-  const gravity = new THREE.Vector3(0, -state.gravity, 0);
+  // FORCES
+  const gravity = new THREE.Vector3(0,-state.gravity,0);
   const lift    = liftDir.multiplyScalar(q * Cl * state.liftScale * groundEffect);
   const drag    = dragDir.multiplyScalar(q * Cd * state.dragScale);
   const sideDamp= sideDir.multiplyScalar(-q * state.sideSlipDamp * beta);
   const thrust  = fwd.clone().multiplyScalar(state.thrustArcade);
 
-  // very light alignment damping (so velocity follows nose without a “current”)
+  // very light stabilizer so “nose leads path” but no “current”
   const vBody = state.vel.clone().applyQuaternion(state.playerQuat.clone().invert());
-  const alignBody = new THREE.Vector3(-vBody.x*0.8, -vBody.y*0.4, 0).multiplyScalar(state.alignStability);
+  const alignBody = new THREE.Vector3(-vBody.x*0.7, -vBody.y*0.4, 0).multiplyScalar(state.alignStability);
   const alignWorld = alignBody.applyQuaternion(state.playerQuat);
 
-  // semi-implicit integration
+  // INTEGRATE
   state.vel.addScaledVector(gravity, dt);
   state.vel.addScaledVector(lift, dt);
   state.vel.addScaledVector(drag, dt);
@@ -640,47 +492,36 @@ renderer.setAnimationLoop(()=>{
   state.vel.addScaledVector(alignWorld, dt);
 
   // clamp speed
-  const spdNew = state.vel.length();
-  if (spdNew > state.maxSpeed) state.vel.multiplyScalar(state.maxSpeed/spdNew);
+  const spdNew=state.vel.length(); if (spdNew>state.maxSpeed) state.vel.multiplyScalar(state.maxSpeed/spdNew);
 
-  // position
+  // move
   state.playerPos.addScaledVector(state.vel, dt);
 
-  // camera
-  const camOffLocal = new THREE.Vector3(0, 4.5, 17.5);
-  const camPos = camOffLocal.clone().applyQuaternion(state.playerQuat).add(state.playerPos);
-  camera.position.lerp(camPos, 0.16);
-  camera.lookAt(state.playerPos.clone().add(fwd.clone().multiplyScalar(34)));
-
-  // glider
-  glider.position.copy(state.playerPos);
-  glider.quaternion.copy(state.playerQuat);
-
-  // collision:
-  // - If outside any cave sphere and below ground → crash
-  // - If inside a cave sphere, you may fly freely; exiting the sphere while still “underground” will crash.
+  // COLLISION
   const insideIdx = pointInAnyNibble(state.playerPos);
   const groundBelow = state.playerPos.y - terrainHeightAt(state.playerPos.x, state.playerPos.z);
-  const nearestDist = (insideIdx>=0) ? caveWallDistance(state.playerPos, insideIdx) - state.playerRadius
-                                     : groundBelow - state.playerRadius;
-  if (insideIdx < 0 && groundBelow < state.playerRadius*0.5) { doCrash(); renderer.render(scene,camera); return; }
+  if (insideIdx>=0){
+    const clearance = caveWallDistance(state.playerPos, insideIdx);
+    if (clearance <= state.playerRadius*0.5){ doCrash(); renderer.render(scene,camera); return; }
+  } else {
+    if (groundBelow <= state.playerRadius*0.5){ doCrash(); renderer.render(scene,camera); return; }
+  }
 
-  // shadow/proximity cue
+  // CAMERA (closer follow → terrain fills frame)
+  const camOffLocal=new THREE.Vector3(0, 3.6, 14.0);
+  const camPos=camOffLocal.clone().applyQuaternion(state.playerQuat).add(state.playerPos);
+  camera.position.lerp(camPos, 0.18);
+  camera.lookAt(state.playerPos.clone().add(fwd.clone().multiplyScalar(32)));
+
+  // VISUALS
+  glider.position.copy(state.playerPos); glider.quaternion.copy(state.playerQuat);
   const displayAlt = (insideIdx>=0) ? Math.max(0, caveWallDistance(state.playerPos, insideIdx)) : groundBelow;
   const yGround = (insideIdx>=0) ? (state.playerPos.y - displayAlt) : (state.playerPos.y - groundBelow);
-  const shadowSize = clamp(30 + displayAlt*0.12, 30, 560);
-  const shadowAlpha = clamp(0.85 - displayAlt/1500, 0.12, 0.85);
+  const shadowSize = clamp(28 + displayAlt*0.13, 28, 560);
+  const shadowAlpha = clamp(0.9 - displayAlt/1500, 0.12, 0.9);
   shadowSprite.position.set(state.playerPos.x, yGround + 0.2, state.playerPos.z);
   shadowSprite.scale.set(shadowSize, shadowSize, 1);
   shadowSprite.material.opacity = shadowAlpha;
-
-  // portal
-  if (portalMesh){
-    const c = portalMesh.userData.center, ringR=portalMesh.userData.ringR, thick=portalMesh.userData.thickness;
-    const dx=state.playerPos.x-c.x, dz=state.playerPos.z-c.z, dy=Math.abs(state.playerPos.y-c.y);
-    const radial=Math.hypot(dx,dz);
-    if (Math.abs(radial - ringR) < thick*0.7 && dy < thick*0.9) nextSeed();
-  }
 
   // HUD / scoring
   const closeness = clamp(1 - (Math.max(0,displayAlt) / state.proxThreshold), 0, 1);
@@ -696,7 +537,7 @@ renderer.setAnimationLoop(()=>{
   uiSeed.textContent  = state.worldSeed;
   uiDiff.textContent  = state.difficulty;
 
-  renderer.render(scene, camera);
+  renderer.render(scene,camera);
 });
 </script>
 </body>

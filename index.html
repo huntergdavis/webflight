@@ -2,21 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Superflight (clean-room) — Glide Aero + Craggy Peaks + Nibble Caves (QA’d)</title>
+  <title>Superflight (clean-room) — Glide Aero · Craggy Peaks · (C)aves Toggle</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body { height:100%; margin:0; background:linear-gradient(#a7d3ff,#eaf6ff); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
     #app { position:fixed; inset:0; overflow:hidden; }
-    .hud { position:absolute; top:8px; left:8px; color:#003; background:rgba(255,255,255,.7); padding:8px 10px; border-radius:12px; font-size:13px; line-height:1.15; backdrop-filter:saturate(1.2) blur(2px); }
+    .hud { position:absolute; top:8px; left:8px; color:#003; background:rgba(255,255,255,.75); padding:8px 10px; border-radius:12px; font-size:13px; line-height:1.15; backdrop-filter:saturate(1.2) blur(2px); }
     .ret { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); opacity:.22; pointer-events:none; }
     .ret .v,.ret .h { background:#000; border-radius:2px; }
     .ret .v { width:4px; height:20px; margin:auto; }
     .ret .h { width:20px; height:4px; margin:4px auto 0; }
-    .help { position:absolute; right:8px; top:8px; color:#003; background:rgba(255,255,255,.7); padding:8px 10px; border-radius:12px; font-size:12px; max-width:380px; backdrop-filter:saturate(1.2) blur(2px); }
+    .help { position:absolute; right:8px; top:8px; color:#003; background:rgba(255,255,255,.75); padding:8px 10px; border-radius:12px; font-size:12px; max-width:420px; backdrop-filter:saturate(1.2) blur(2px); }
     .overlay { position:absolute; inset:0; display:none; place-items:center; color:#fff; }
     .overlay .box { background:rgba(0,0,0,.55); padding:16px 20px; border-radius:18px; text-align:center; }
-    .foot { position:absolute; left:50%; bottom:8px; transform:translateX(-50%); color:#003; font-size:11px; background:rgba(255,255,255,.7); padding:4px 8px; border-radius:999px; opacity:.9; }
-    #err { position:fixed; right:8px; bottom:8px; max-width:46ch; background:#220; color:#fee; font:12px/1.3 ui-monospace,monospace; padding:8px 10px; border-radius:12px; display:none; white-space:pre-wrap; }
+    .foot { position:absolute; left:50%; bottom:8px; transform:translateX(-50%); color:#003; font-size:11px; background:rgba(255,255,255,.75); padding:4px 8px; border-radius:999px; opacity:.9; }
+    #err { position:fixed; right:8px; bottom:8px; max-width:56ch; background:#220; color:#fee; font:12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding:8px 10px; border-radius:12px; display:none; white-space:pre-wrap; }
   </style>
 </head>
 <body>
@@ -30,6 +30,7 @@
   <div><b>Seed:</b> <span id="uiSeed">0</span></div>
   <div><b>Diff:</b> <span id="uiDiff">1</span></div>
   <div><b>Quality:</b> <span id="uiQual">High</span></div>
+  <div><b>Caves:</b> <span id="uiCaves">Off</span></div>
 </div>
 
 <div class="ret"><div class="v"></div><div class="h"></div></div>
@@ -39,7 +40,7 @@
   <div>W/S or ↑/↓: pitch (W = nose down, S = nose up)</div>
   <div>A/D or ←/→: yaw (A = left, D = right)</div>
   <div>Q/E: roll</div>
-  <div>P: pause · R: restart · 1: High · 2: Ultra · N: new seed</div>
+  <div>P: pause · R: restart · 1: High · 2: Ultra · N: new seed · C: toggle caves</div>
 </div>
 
 <div id="crash" class="overlay" style="background:rgba(177,0,0,.35);">
@@ -57,7 +58,7 @@
   </div>
 </div>
 
-<div class="foot">Glide aero (no “current”) · Craggy peaks · Nibbled caves near spawn</div>
+<div class="foot">Glide aero (no “current”) · Craggy peak terrain · Robust caves (toggle with C)</div>
 <div id="err"></div>
 
 <script type="module">
@@ -91,16 +92,17 @@ const uiAlt   = document.getElementById('uiAlt');
 const uiSeed  = document.getElementById('uiSeed');
 const uiDiff  = document.getElementById('uiDiff');
 const uiQual  = document.getElementById('uiQual');
+const uiCaves = document.getElementById('uiCaves');
 const crashEl = document.getElementById('crash');
 const pausedEl= document.getElementById('paused');
 
 /* ========= three ========= */
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(64, 1, 0.1, 45000);
-camera.position.set(0, 1500, 4500);
-const fogColor = new THREE.Color('#cfeaff'); scene.fog = new THREE.Fog(fogColor, 700, 28000);
+const camera = new THREE.PerspectiveCamera(64, 1, 0.1, 48000);
+camera.position.set(0, 1400, 4200);
+const fogColor = new THREE.Color('#cfeaff'); scene.fog = new THREE.Fog(fogColor, 700, 30000);
 scene.add(new THREE.HemisphereLight(0xcfeaff, 0xbfa17a, 0.95));
-const sun = new THREE.DirectionalLight(0xffffff, 1.0); sun.position.set(-1400,2200,1200); scene.add(sun);
+const sun = new THREE.DirectionalLight(0xffffff, 1.0); sun.position.set(-1400,2300,1200); scene.add(sun);
 scene.add(new THREE.AmbientLight(0xffffff, 0.20));
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); renderer.setSize(window.innerWidth, window.innerHeight); app.appendChild(renderer.domElement);
@@ -121,6 +123,7 @@ function setKey(e, down){
     case 'Digit1': if(down) setQuality('high'); break;
     case 'Digit2': if(down) setQuality('ultra'); break;
     case 'KeyN': if(down) nextSeed(); break;
+    case 'KeyC': if(down) toggleCaves(); break;
   }
 }
 window.addEventListener('keydown', e=>setKey(e,true), {passive:false});
@@ -128,23 +131,23 @@ window.addEventListener('keyup',   e=>setKey(e,false), {passive:false});
 
 /* ========= player/physics ========= */
 const state = {
-  playerPos: new THREE.Vector3(0,1500,4500),
+  playerPos: new THREE.Vector3(0,1400,4200),
   playerQuat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), rad(6)),
   playerRadius: 1.1,
-  vel: new THREE.Vector3(0,-10,-60),
+  vel: new THREE.Vector3(0,-10,-62),
 
-  // Glide-centric arcade aero
+  // Glide-centric arcade aero (no “current”)
   gravity: 9.0,
-  qScale: 0.020, liftScale: 0.20, dragScale: 0.016,
-  Cd0: 0.012, CdK: 0.030, ClMax: 1.8, aoaLimit: rad(32),
-  sideSlipDamp: 0.5, alignStability: 0.10, thrustArcade: 1.6,
-  groundEffectH: 150, groundEffectStrength: 0.6,
+  qScale: 0.022, liftScale: 0.22, dragScale: 0.015,
+  Cd0: 0.012, CdK: 0.030, ClMax: 1.85, aoaLimit: rad(32),
+  sideSlipDamp: 0.45, alignStability: 0.08, thrustArcade: 0.8,
+  groundEffectH: 160, groundEffectStrength: 0.6,
 
-  maxSpeed: 190,
+  maxSpeed: 195,
 
-  yawRate:   rad(95),
-  pitchRate: rad(82),
-  rollRate:  rad(165),
+  yawRate:   rad(98),
+  pitchRate: rad(84),
+  rollRate:  rad(168),
 
   score:0, multiplier:1, maxMultiplier:12, proxThreshold:16,
   crashed:false, paused:false,
@@ -152,6 +155,7 @@ const state = {
 };
 
 let quality = 'high'; uiQual.textContent='High';
+let cavesEnabled = false; uiCaves.textContent = 'Off';
 
 /* ========= glider + shadow ========= */
 function buildGlider(){
@@ -173,16 +177,16 @@ function makeShadowTexture(){ const s=64, c=document.createElement('canvas'); c.
 const shadowSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeShadowTexture(), transparent:true, depthWrite:false, opacity:.85 }));
 shadowSprite.renderOrder = -1; scene.add(shadowSprite);
 
-/* ========= terrain + caves ========= */
+/* ========= terrain + (optional) caves ========= */
 let terrain=null, portalMesh=null;
-const NIBBLE_MAX=64;
+const NIBBLE_MAX=48; // smaller → safer on more GPUs
 const nibbleData={ count:0, spheres:new Array(NIBBLE_MAX).fill(0).map(()=>new THREE.Vector4()), walls:null };
 
 function makeCloudTexture(){ const s=128,c=document.createElement('canvas'); c.width=c.height=s; const x=c.getContext('2d');
   const g=x.createRadialGradient(s/2,s/2,12, s/2,s/2,s/2); g.addColorStop(0,'rgba(255,255,255,0.9)'); g.addColorStop(1,'rgba(255,255,255,0)');
   x.fillStyle=g; x.fillRect(0,0,s,s); const tex=new THREE.CanvasTexture(c); tex.anisotropy=4; return tex; }
 function buildCloudLayer(seed, params){
-  const tex = makeCloudTexture(); const grp=new THREE.Group(); const n=(quality==='ultra')?240:180;
+  const tex = makeCloudTexture(); const grp=new THREE.Group(); const n=(quality==='ultra')?220:170;
   for(let i=0;i<n;i++){ const sp=new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true, depthWrite:false, opacity:0.24+Math.random()*0.36 }));
     sp.position.set((Math.random()-0.5)*params.width*1.3, 2000+(Math.random()-0.5)*160, (Math.random()-0.25)*params.length);
     const s=(quality==='ultra'?160:130)+Math.random()*200; sp.scale.set(s,s,1); grp.add(sp); }
@@ -196,16 +200,19 @@ function makeHeightFn(seed, params){
   return (x,z)=>{
     const n1 = fbm(x*nx, z*nz, 7, 0.55, 2.05);
     const n2 = ridged(fbm(x*nx*0.6, z*nz*0.6, 6, 0.5, 2.0));
-    const n3 = fbm(x*nx*5.8, z*nz*5.8, 3, 0.5, 2.0);
+    const n3 = fbm(x*nx*6.2, z*nz*6.2, 3, 0.5, 2.0);
     const base = (1-params.ridgeMix)*n1 + params.ridgeMix*n2;
     const peaky = 1 - Math.pow(1 - base, params.peakSharp);
     const shaped = clamp(peaky + (n3-0.5)*params.microAmp, 0, 1);
-    const slopeTerm = (-(z + params.length*0.30) / params.length) * params.slope * params.amp;
+    const slopeTerm = (-(z + params.length*0.28) / params.length) * params.slope * params.amp;
     return params.base + shaped*params.amp + slopeTerm;
   };
 }
 
 function applyNibbleShader(mat){
+  // Guard against double-attach
+  if (mat.userData._nibbleApplied) return;
+  mat.userData._nibbleApplied = true;
   mat.defines = mat.defines || {};
   mat.defines.NIBBLE_MAX = NIBBLE_MAX;
   mat.onBeforeCompile = (shader)=>{
@@ -214,15 +221,17 @@ function applyNibbleShader(mat){
     shader.vertexShader =
       `varying vec3 vWorldPos;` +
       shader.vertexShader.replace('#include <worldpos_vertex>', `#include <worldpos_vertex>\n vWorldPos = worldPosition.xyz;`);
+    // Use a very safe injection point that exists on all Std materials.
     shader.fragmentShader =
       `uniform int nibbleCount; uniform vec4 nibbleSpheres[NIBBLE_MAX]; varying vec3 vWorldPos;` +
-      shader.fragmentShader.replace('#include <clipping_planes_fragment>', `
-        #include <clipping_planes_fragment>
-        for (int i=0; i<NIBBLE_MAX; i++){
-          if (i >= nibbleCount) break;
-          vec3 C = nibbleSpheres[i].xyz; float R = nibbleSpheres[i].w;
-          if (distance(vWorldPos, C) < R) discard;
-        }
+      shader.fragmentShader.replace('void main() {', `
+        void main() {
+          // discard inside any cave sphere
+          for (int i=0; i<NIBBLE_MAX; i++){
+            if (i >= nibbleCount) break;
+            vec3 C = nibbleSpheres[i].xyz; float R = nibbleSpheres[i].w;
+            if (distance(vWorldPos, C) < R) { discard; }
+          }
       `);
     mat.userData.shader = shader;
   };
@@ -233,20 +242,24 @@ function updateNibbleUniforms(){ const s=terrain?.mat?.userData?.shader; if (s){
 function buildTerrain(seed){
   const isUltra=(quality==='ultra');
   const params = isUltra ? {
-    width:7200, length:28000, amp:3300, base:-160, slope:0.022,
-    nx:0.00115, nz:0.00115, ridgeMix:0.86, microAmp:0.22, peakSharp:4.0,
-    tilesX:8, tilesZ:22, tileSeg:64
+    width:7000, length:26000, amp:3600, base:-160, slope:0.022,
+    nx:0.00112, nz:0.00112, ridgeMix:0.86, microAmp:0.22, peakSharp:4.2,
+    tilesX:8, tilesZ:20, tileSeg:64 // ~655k verts
   } : {
-    width:5200, length:20000, amp:2300, base:-130, slope:0.021,
-    nx:0.00125, nz:0.00125, ridgeMix:0.82, microAmp:0.18, peakSharp:3.0,
-    tilesX:6, tilesZ:16, tileSeg:56
+    width:5200, length:19000, amp:2600, base:-130, slope:0.021,
+    nx:0.00125, nz:0.00125, ridgeMix:0.82, microAmp:0.18, peakSharp:3.2,
+    tilesX:6, tilesZ:14, tileSeg:56 // ~275k verts
   };
 
   const heightAt = makeHeightFn(seed, params);
 
   const group = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({ vertexColors:true, flatShading:false, roughness:0.95, metalness:0.02 });
-  applyNibbleShader(mat);
+
+  // Only attach nibble shader when cavesEnabled
+  if (cavesEnabled) {
+    try { applyNibbleShader(mat); } catch(e){ showError('Cave shader failed — falling back to no caves'); cavesEnabled=false; uiCaves.textContent='Off'; }
+  }
 
   const startX=-params.width/2, startZ=-params.length/2;
   const tileW=params.width/params.tilesX, tileL=params.length/params.tilesZ;
@@ -258,7 +271,8 @@ function buildTerrain(seed){
       const pos=geo.attributes.position, vcount=pos.count;
       const colors=new Float32Array(vcount*3);
 
-      const ox = startX + tileW*(tx+0.5), oz = startZ + tileL*(tz+0.5);
+      const ox = startX + tileW*(tx+0.5);
+      const oz = startZ + tileL*(tz+0.5);
 
       let i=0;
       for (let v=0; v<vcount; v++){
@@ -279,62 +293,46 @@ function buildTerrain(seed){
       }
       geo.setAttribute('color', new THREE.BufferAttribute(colors,3));
       geo.computeVertexNormals();
+      geo.computeBoundingSphere();
+      geo.computeBoundingBox();
 
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set(ox,0,oz); group.add(mesh);
+      mesh.position.set(ox,0,oz);
+      mesh.frustumCulled = false; // robust visibility
+      group.add(mesh);
     }
   }
 
+  // simple cloud sprites
   group.add(buildCloudLayer(seed, params));
 
   scene.add(group);
   return { group, params, heightAt, mat };
 }
 
-/* ——— Smart spawn so mountains are RIGHT THERE ——— */
-function pickSpawn(params, heightAt){
-  // try several z-bands near the “top” so you look into mountains immediately
-  const candidates=[];
-  const xs = [0, -300, 300, -600, 600];
-  for (const z of [params.length*0.38, params.length*0.34, params.length*0.30, params.length*0.26]){
-    for (const x of xs){
-      const y0 = heightAt(x, z);
-      const yAhead = heightAt(x, z-800);
-      const relief = Math.abs(yAhead - y0);
-      const tall = y0 - (params.base) ; // how high above base
-      candidates.push({ x, z, y:y0, score: relief*0.7 + tall*0.3 });
-    }
-  }
-  candidates.sort((a,b)=>b.score-a.score);
-  const best = candidates[0] || {x:0,z:params.length*0.34,y:heightAt(0, params.length*0.34)};
-  const spawn = { x: best.x, z: best.z, y: best.y + 250 }; // ~250m AGL
-  const lookDir = new THREE.Vector3(0,0,-1); // face -Z
-  return { spawn, lookDir };
-}
-
-/* ——— Nibble tunnels: place one near spawn + one further ——— */
+/* ========== “safe” caves ========== */
 function generateNibbles(seed, params, heightAt, anchorZ){
   const rng = rng32(seed ^ 0xBEEFCAFE);
   const spheres=[];
   const plan = [
-    { zMid: anchorZ - 1400, zSpan: 1400 }, // near spawn
-    { zMid: -params.length*0.22, zSpan: 1800 } // deeper in map
+    { zMid: anchorZ - 1200, zSpan: 1400 }, // near spawn
+    { zMid: -params.length*0.22, zSpan: 1700 } // farther out
   ];
   for (const seg of plan){
     const zStart = seg.zMid + seg.zSpan*0.5, zEnd = seg.zMid - seg.zSpan*0.5;
     const xMid = (rng()*2-1) * params.width*0.15;
-    const xAmp = 220 + rng()*320;
+    const xAmp = 200 + rng()*280;
     const phase = rng()*Math.PI*2;
-    const steps = 26;
+    const steps = 22; // keep light
     for (let i=0;i<steps;i++){
       const s = i/(steps-1);
       const z = THREE.MathUtils.lerp(zStart, zEnd, s);
-      const x = xMid + Math.sin(s*3.2 + phase) * xAmp + (rng()*2-1)*60;
+      const x = xMid + Math.sin(s*3.1 + phase) * xAmp + (rng()*2-1)*60;
       const ySurf = heightAt(x,z);
-      if (ySurf < params.base + params.amp*0.55) continue; // need mountain
-      const depth = 30 + rng()*90;
+      if (ySurf < params.base + params.amp*0.55) continue;
+      const depth = 30 + rng()*80;
       const y = ySurf - depth;
-      let r = (quality==='ultra' ? 46 : 40) + rng()*10;
+      let r = (quality==='ultra' ? 44 : 38) + rng()*8;
       const mouth = 0.55 - Math.abs(s-0.5);
       r *= 0.75 + mouth*0.5;
       spheres.push(new THREE.Vector4(x,y,z,r));
@@ -349,9 +347,9 @@ function generateNibbles(seed, params, heightAt, anchorZ){
     else nibbleData.spheres[i].set(0,0,0,0);
   }
 
-  // cave walls (inverted spheres)
+  // cave walls (inverted spheres) — only if cavesEnabled
   if (nibbleData.walls){ scene.remove(nibbleData.walls); nibbleData.walls.geometry.dispose(); nibbleData.walls.material.dispose(); nibbleData.walls=null; }
-  if (nibbleData.count>0){
+  if (cavesEnabled && nibbleData.count>0){
     const geo = new THREE.SphereGeometry(1, 22, 16);
     const mat = new THREE.MeshStandardMaterial({ color:0x6c4e3d, roughness:0.95, metalness:0.02, side:THREE.BackSide });
     const inst = new THREE.InstancedMesh(geo, mat, nibbleData.count);
@@ -361,7 +359,7 @@ function generateNibbles(seed, params, heightAt, anchorZ){
   }
 }
 
-/* ========== build world ========== */
+/* ========== world mgmt ========== */
 function disposeWorld(){
   if (!terrain) return;
   if (nibbleData.walls){ scene.remove(nibbleData.walls); nibbleData.walls.geometry.dispose(); nibbleData.walls.material.dispose(); nibbleData.walls=null; }
@@ -371,39 +369,60 @@ function disposeWorld(){
   terrain=null; portalMesh=null;
 }
 
+function pickSpawn(params, heightAt){
+  const candidates=[];
+  const xs = [0, -300, 300, -600, 600, -900, 900];
+  for (const z of [params.length*0.36, params.length*0.33, params.length*0.30]){
+    for (const x of xs){
+      const y0 = heightAt(x, z);
+      const yAhead = heightAt(x, z-800);
+      const relief = Math.abs(yAhead - y0);
+      const tall = y0 - params.base;
+      candidates.push({ x, z, y:y0, score: relief*0.7 + tall*0.3 });
+    }
+  }
+  candidates.sort((a,b)=>b.score-a.score);
+  const best = candidates[0] || {x:0,z:params.length*0.34,y:heightAt(0, params.length*0.34)};
+  return { x: best.x, z: best.z, y: best.y + 240 };
+}
+
 function generateWorld(seed){
   const t0=performance.now();
   disposeWorld();
   terrain = buildTerrain(seed);
-  // smart spawn
-  const pick = pickSpawn(terrain.params, terrain.heightAt);
-  const start = pick.spawn; // {x,y,z}
-  // carve caves with an anchor near spawn so you can test immediately
-  generateNibbles(seed, terrain.params, terrain.heightAt, start.z);
-  updateNibbleUniforms();
 
-  // put player above ground, looking down the run
-  state.playerPos.set(start.x, start.y, start.z);
+  // Spawn near good terrain, then optionally carve caves anchored near spawn
+  const spawn = pickSpawn(terrain.params, terrain.heightAt);
+  if (cavesEnabled){
+    try {
+      generateNibbles(seed, terrain.params, terrain.heightAt, spawn.z);
+      updateNibbleUniforms();
+    } catch(e){
+      showError('Caves failed to build — falling back'); cavesEnabled=false; uiCaves.textContent='Off';
+    }
+  }
+
+  // position player
+  state.playerPos.set(spawn.x, spawn.y, spawn.z);
   state.playerQuat.identity().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), rad(6)));
   const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(state.playerQuat).normalize();
   state.vel.copy(fwd).multiplyScalar(72); state.vel.y -= 6;
 
   uiSeed.textContent=seed;
-  const buildMs=performance.now()-t0;
-  if (quality==='ultra' && buildMs>3000){ showError(`Ultra build took ${buildMs.toFixed(0)} ms → switching to High`); setQuality('high'); }
+  const ms=performance.now()-t0;
+  if (quality==='ultra' && ms>3000){ showError(`Ultra took ${ms.toFixed(0)} ms → switching to High`); setQuality('high'); }
 }
 
 function setQuality(q){ quality=q; uiQual.textContent=(q==='ultra')?'Ultra':'High'; generateWorld(state.worldSeed); }
 function nextSeed(){ state.worldSeed = (state.worldSeed*1664525 + 1013904223) >>> 0; state.difficulty += 1; generateWorld(state.worldSeed); }
+function toggleCaves(){ cavesEnabled = !cavesEnabled; uiCaves.textContent = cavesEnabled ? 'On' : 'Off'; generateWorld(state.worldSeed); }
 
 /* ========= pause / restart ========= */
 function togglePause(){ state.paused=!state.paused; pausedEl.style.display = state.paused ? 'grid' : 'none'; }
 function doCrash(){ state.crashed=true; crashEl.style.display='grid'; state.highScore=Math.max(state.highScore, state.score|0); document.getElementById('uiHi').textContent=state.highScore.toFixed(0); }
 function restart(){
-  // re-pick a fresh spawn in the same world (still smart, so you’re near peaks)
-  const pick = pickSpawn(terrain.params, terrain.heightAt);
-  const start = pick.spawn;
-  state.playerPos.set(start.x, start.y, start.z);
+  const spawn = pickSpawn(terrain.params, terrain.heightAt);
+  state.playerPos.set(spawn.x, spawn.y, spawn.z);
   state.playerQuat.identity().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), rad(6)));
   const fwd = new THREE.Vector3(0,0,-1).applyQuaternion(state.playerQuat).normalize();
   state.vel.copy(fwd).multiplyScalar(72); state.vel.y -= 6;
@@ -415,7 +434,7 @@ function terrainHeightAt(x,z){ return terrain.heightAt(x,z); }
 function terrainNormalAt(x,z){ const e=6, hL=terrainHeightAt(x-e,z), hR=terrainHeightAt(x+e,z), hD=terrainHeightAt(x,z-e), hU=terrainHeightAt(x,z+e);
   return new THREE.Vector3(-(hR-hL)/(2*e), 1, -(hU-hD)/(2*e)).normalize(); }
 
-function pointInAnyNibble(p){ for (let i=0;i<nibbleData.count;i++){ const v=nibbleData.spheres[i]; const dx=p.x-v.x, dy=p.y-v.y, dz=p.z-v.z; if (dx*dx+dy*dy+dz*dz < v.w*v.w) return i; } return -1; }
+function pointInAnyNibble(p){ if (!cavesEnabled) return -1; for (let i=0;i<nibbleData.count;i++){ const v=nibbleData.spheres[i]; const dx=p.x-v.x, dy=p.y-v.y, dz=p.z-v.z; if (dx*dx+dy*dy+dz*dz < v.w*v.w) return i; } return -1; }
 function caveWallDistance(p, idx){ const v=nibbleData.spheres[idx]; const d=Math.hypot(p.x-v.x,p.y-v.y,p.z-v.z); return v.w - d; }
 function terrainDistanceBelow(pos){
   const insideIdx = pointInAnyNibble(pos);
@@ -507,11 +526,11 @@ renderer.setAnimationLoop(()=>{
     if (groundBelow <= state.playerRadius*0.5){ doCrash(); renderer.render(scene,camera); return; }
   }
 
-  // CAMERA (closer follow → terrain fills frame)
-  const camOffLocal=new THREE.Vector3(0, 3.6, 14.0);
+  // CAMERA (close follow so terrain fills frame)
+  const camOffLocal=new THREE.Vector3(0, 3.6, 13.5);
   const camPos=camOffLocal.clone().applyQuaternion(state.playerQuat).add(state.playerPos);
   camera.position.lerp(camPos, 0.18);
-  camera.lookAt(state.playerPos.clone().add(fwd.clone().multiplyScalar(32)));
+  camera.lookAt(state.playerPos.clone().add(fwd.clone().multiplyScalar(30)));
 
   // VISUALS
   glider.position.copy(state.playerPos); glider.quaternion.copy(state.playerQuat);

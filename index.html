@@ -2,17 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Superflight (clean-room) — Daylight Mountain Glide</title>
+  <title>Superflight (clean-room) — Tall Mountain Glide</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body { height:100%; margin:0; background:linear-gradient(#a7d3ff,#eaf6ff); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
     #app { position:fixed; inset:0; overflow:hidden; }
     .hud { position:absolute; top:8px; left:8px; color:#003; background:rgba(255,255,255,.6); padding:8px 10px; border-radius:12px; font-size:13px; line-height:1.15; backdrop-filter:saturate(1.2) blur(2px); }
-    .ret { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); color:#000; opacity:.35; pointer-events:none; }
-    .ret div { background:rgba(0,0,0,.7); border-radius:2px; margin:auto; }
+    .ret { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); color:#000; opacity:.28; pointer-events:none; }
+    .ret div { background:rgba(0,0,0,.65); border-radius:2px; margin:auto; }
     .ret .v { width:4px; height:20px; }
     .ret .h { width:20px; height:4px; margin-top:4px; }
-    .help { position:absolute; right:8px; top:8px; color:#003; background:rgba(255,255,255,.6); padding:8px 10px; border-radius:12px; font-size:12px; max-width:300px; backdrop-filter:saturate(1.2) blur(2px); }
+    .help { position:absolute; right:8px; top:8px; color:#003; background:rgba(255,255,255,.6); padding:8px 10px; border-radius:12px; font-size:12px; max-width:320px; backdrop-filter:saturate(1.2) blur(2px); }
     .overlay { position:absolute; inset:0; display:none; place-items:center; color:#fff; }
     .overlay .box { background:rgba(0,0,0,.55); padding:16px 20px; border-radius:18px; text-align:center; }
     .foot { position:absolute; left:50%; bottom:8px; transform:translateX(-50%); color:#003; font-size:11px; background:rgba(255,255,255,.6); padding:4px 8px; border-radius:999px; opacity:.9; }
@@ -25,6 +25,7 @@
   <div><b>Score:</b> <span id="uiScore">0</span></div>
   <div>× <b>Mult:</b> <span id="uiMult">1.0</span></div>
   <div><b>Speed:</b> <span id="uiSpeed">0</span></div>
+  <div><b>Alt:</b> <span id="uiAlt">0</span> m</div>
   <div><b>Seed:</b> <span id="uiSeed">0</span></div>
   <div><b>Diff:</b> <span id="uiDiff">1</span></div>
 </div>
@@ -54,20 +55,19 @@
   </div>
 </div>
 
-<div class="foot">Daylight sky · Cloud layer · Mountain range (no caves) · Glide physics</div>
+<div class="foot">Tall mountain range · Wider map · Glide physics · Depth cues</div>
 
 <script type="module">
 import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
 
-////////////////////////////// utils
+/* ========= utils ========= */
 function mulberry32(seed){ let t=seed>>>0; return ()=>{ t+=0x6D2B79F5; let r=Math.imul(t^(t>>>15),1|t); r^=r+Math.imul(r^(r>>>7),61|r); return ((r^(r>>>14))>>>0)/4294967296; }; }
 const randRange=(rng,a,b)=>a+(b-a)*rng();
 const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
 const smooth=(t)=>t*t*(3-2*t); // smoothstep
-
-// PURE 32-BIT value noise (no BigInt)
+// 32-bit value-noise (no BigInt)
 function makeNoise2D(seed) {
-  const s = seed | 0; // 32-bit
+  const s = seed | 0;
   function hash(i, j) {
     let h = ((i|0) * 374761393) ^ ((j|0) * 668265263) ^ (s * 362437);
     h = (h ^ (h >>> 13)) >>> 0;
@@ -89,66 +89,66 @@ function makeFBM(noise){
   return (x,z,oct=5,pers=0.5,lacun=2)=>{ 
     let f=1,a=1,acc=0,sum=0;
     for(let o=0;o<oct;o++){ acc+=a*noise(x*f,z*f); sum+=a; f*=lacun; a*=pers; }
-    return acc/sum;
+    return acc/sum; // 0..1
   };
 }
-function ridged(n){ return 1 - Math.abs(2*n - 1); }
+function ridged(n){ return 1 - Math.abs(2*n - 1); } // maps 0..1 to ridged 0..1
 
-////////////////////////////// DOM
+/* ========= DOM ========= */
 const app = document.getElementById('app');
 const uiScore = document.getElementById('uiScore');
 const uiMult  = document.getElementById('uiMult');
 const uiSpeed = document.getElementById('uiSpeed');
+const uiAlt   = document.getElementById('uiAlt');
 const uiSeed  = document.getElementById('uiSeed');
 const uiDiff  = document.getElementById('uiDiff');
 const crashEl = document.getElementById('crash');
 const pausedEl= document.getElementById('paused');
 
-////////////////////////////// three setup
+/* ========= three setup ========= */
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 6000);
-camera.position.set(0, 280, 220);
+const camera = new THREE.PerspectiveCamera(65, 1, 0.1, 20000); // slightly tighter FOV, much farther clip
+camera.position.set(0, 1200, 3200);
 
 const fogColor = new THREE.Color('#cfeaff');
-scene.fog = new THREE.Fog(fogColor, 120, 2600);
+scene.fog = new THREE.Fog(fogColor, 500, 15000);
 
-const hemi = new THREE.HemisphereLight(0xcfeaff, 0xbfa17a, 0.9); // bright sky, warm ground
-hemi.position.set(0,400,0); scene.add(hemi);
-const dir  = new THREE.DirectionalLight(0xffffff, 0.8); dir.position.set(-120,200,80); scene.add(dir);
-const amb  = new THREE.AmbientLight(0xffffff, 0.25); scene.add(amb);
+const hemi = new THREE.HemisphereLight(0xcfeaff, 0xbfa17a, 0.95); hemi.position.set(0,800,0); scene.add(hemi);
+const dir  = new THREE.DirectionalLight(0xffffff, 0.9); dir.position.set(-600,1200,800); scene.add(dir);
+const amb  = new THREE.AmbientLight(0xffffff, 0.22); scene.add(amb);
 
 const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 app.appendChild(renderer.domElement);
 
-////////////////////////////// state
+/* ========= state ========= */
 const inputs = { w:false,s:false,a:false,d:false,q:false,e:false };
-let terrain = null; // set later
+let terrain = null;
 let portalMesh = null;
 
 const state = {
-  playerPos: new THREE.Vector3(0,280,220),
-  playerQuat: new THREE.Quaternion().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(12))), // slight nose-down
+  playerPos: new THREE.Vector3(0,1200,3200),
+  playerQuat: new THREE.Quaternion().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(10))), // slight nose-down
   playerRadius: 1.0,
-  vel: new THREE.Vector3(0,-10,-20),
+  vel: new THREE.Vector3(0,-14,-40),
 
-  gravity: 9.5,       // ↓ less gravity → more glide
-  glideAccel: 26,     // thrust along forward
-  drag: 0.42,         // gentle drag
-  maxSpeed: 110,
+  gravity: 9.2,      // glide
+  glideAccel: 28,
+  drag: 0.38,
+  maxSpeed: 140,
 
   yawRate:   THREE.MathUtils.degToRad(90),
   pitchRate: THREE.MathUtils.degToRad(70),
   rollRate:  THREE.MathUtils.degToRad(140),
 
-  score: 0, multiplier: 1, maxMultiplier: 12, proxThreshold: 8.0,
+  score: 0, multiplier: 1, maxMultiplier: 12, proxThreshold: 12.0,
   crashed:false, paused:false,
   worldSeed: Math.floor(Math.random()*1e9), difficulty:1,
   highScore:0,
 };
 
-////////////////////////////// glider
+/* ========= glider + shadow marker ========= */
 function buildGlider(){
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.ConeGeometry(0.5,1.8,6), new THREE.MeshStandardMaterial({color:0xffffff, roughness:.4, metalness:.1}));
@@ -161,41 +161,57 @@ function buildGlider(){
 }
 const glider = buildGlider(); scene.add(glider);
 
-////////////////////////////// terrain gen (heightmap, no caves)
+function makeShadowTexture(){
+  const s=64, cnv=document.createElement('canvas'); cnv.width=cnv.height=s;
+  const ctx=cnv.getContext('2d');
+  const g=ctx.createRadialGradient(s/2,s/2,8, s/2,s/2,s/2);
+  g.addColorStop(0,'rgba(0,0,0,0.35)');
+  g.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(s/2,s/2,s/2,0,Math.PI*2); ctx.fill();
+  const tex = new THREE.CanvasTexture(cnv); tex.anisotropy = 4; return tex;
+}
+const shadowSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeShadowTexture(), transparent:true, depthWrite:false, opacity:.8 }));
+shadowSprite.renderOrder = -1;
+scene.add(shadowSprite);
+
+/* ========= terrain (heightmap, much taller + wider) ========= */
 function buildTerrain(seed){
   const rng = mulberry32(seed);
   const theme = {
-    rockLo: new THREE.Color('#d49a6a'), // sand/rock
-    rockHi: new THREE.Color('#8d6442'), // darker strata
+    rockLo: new THREE.Color('#cda077'),
+    rockHi: new THREE.Color('#8d6442'),
     grass:  new THREE.Color('#9ecb7a'),
     snow:   new THREE.Color('#f5f7fb')
   };
 
   const params = {
-    width: 900,
-    length: 5200,
-    segX: 160,
-    segZ: 420,
-    amp: 95,
-    base: -20,
-    slope: 0.04,     // gentle overall descent toward -Z
-    nx: 0.0022,      // noise scale X
-    nz: 0.0022,
-    ridgeMix: 0.55,  // blend fbm/ridge
+    width:  3000,    // wider map
+    length: 12000,   // longer run
+    segX:   320,     // ↑ mesh resolution (balance perf & detail)
+    segZ:   900,
+    amp:    950,     // ~10x higher mountains
+    base:   -100,
+    slope:  0.02,    // gentle overall downhill towards -Z
+    nx:     0.0016,  // base noise scale (bigger features)
+    nz:     0.0016,
+    ridgeMix: 0.65,  // more ridges
+    microAmp: 0.10,  // small detail overlay
   };
 
   const noise = makeNoise2D(seed ^ 0x9e3779b9);
   const fbm   = makeFBM(noise);
 
   function heightAt(x,z){
-    const n1 = fbm(x*params.nx, z*params.nz, 5, 0.55, 2.1);
-    const n2 = ridged(fbm(x*params.nx*0.45, z*params.nz*0.45, 4, 0.5, 2.0));
-    const shape = (1-params.ridgeMix)*n1 + params.ridgeMix*n2; // 0..1
-    const slopeTerm = (-(z + params.length*0.35) / params.length) * params.slope * params.amp; // down as z decreases
+    const n1 = fbm(x*params.nx, z*params.nz, 6, 0.55, 2.05);                 // broad hills
+    const n2 = ridged(fbm(x*params.nx*0.55, z*params.nz*0.55, 5, 0.5, 2.0)); // ridges
+    const n3 = fbm(x*params.nx*4.0, z*params.nz*4.0, 3, 0.5, 2.0);           // micro detail
+    const shapeBase = (1-params.ridgeMix)*n1 + params.ridgeMix*n2;
+    const shape = clamp(shapeBase + (n3-0.5)*params.microAmp, 0, 1);
+    const slopeTerm = (-(z + params.length*0.30) / params.length) * params.slope * params.amp;
     return params.base + shape*params.amp + slopeTerm;
   }
 
-  // geometry
+  // plane geometry deformed by heightAt
   const geo = new THREE.PlaneGeometry(params.width, params.length, params.segX, params.segZ);
   geo.rotateX(-Math.PI/2);
   const pos = geo.attributes.position;
@@ -207,12 +223,15 @@ function buildTerrain(seed){
     const y = heightAt(x,z);
     pos.setY(v, y);
 
-    // vertex color by altitude
-    const t = clamp((y - (params.base-20)) / (params.amp+40), 0, 1);
+    // vertex color by altitude with subtle contouring
+    const t = clamp((y - (params.base-60)) / (params.amp+200), 0, 1);
     let c = new THREE.Color();
     if (t < 0.45) c.lerpColors(theme.rockLo, theme.rockHi, t/0.45);
     else if (t < 0.80) c.lerpColors(theme.rockHi, theme.grass, (t-0.45)/0.35);
     else c.lerpColors(theme.grass, theme.snow, (t-0.80)/0.20);
+    // light contour bands for depth cue
+    const band = ((Math.floor((y+100)/50)%2) ? 0.95 : 1.05);
+    c.multiplyScalar(band);
     colors[i++]=c.r; colors[i++]=c.g; colors[i++]=c.b;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors,3));
@@ -221,15 +240,15 @@ function buildTerrain(seed){
   const mat = new THREE.MeshStandardMaterial({ vertexColors:true, flatShading:false, roughness:0.95, metalness:0.02 });
   const mesh = new THREE.Mesh(geo, mat);
 
-  // clouds: billboards high above
+  // clouds: more, spread wider & farther
   const cloudGroup = buildCloudLayer(seed, params);
 
   // portal near far end above a valley
-  const portalZ = -params.length/2 + 140;
-  const portalY = heightAt(0, portalZ) + 35;
-  const ringR=12, ringT=1.8;
-  const portalMat = new THREE.MeshStandardMaterial({ color: 0x7aa2ff, emissive: new THREE.Color(0x7aa2ff).multiplyScalar(.5), roughness:.2, metalness:0.0 });
-  const portalMeshLocal = new THREE.Mesh(new THREE.TorusGeometry(ringR, ringT, 16, 44), portalMat);
+  const portalZ = -params.length/2 + 200;
+  const portalY = heightAt(0, portalZ) + 60;
+  const ringR=18, ringT=2.2;
+  const portalMat = new THREE.MeshStandardMaterial({ color: 0x7aa2ff, emissive: new THREE.Color(0x7aa2ff).multiplyScalar(.55), roughness:.2, metalness:0.0 });
+  const portalMeshLocal = new THREE.Mesh(new THREE.TorusGeometry(ringR, ringT, 16, 64), portalMat);
   portalMeshLocal.position.set(0, portalY, portalZ);
   portalMeshLocal.userData.center = portalMeshLocal.position.clone();
   portalMeshLocal.userData.ringR = ringR;
@@ -239,41 +258,39 @@ function buildTerrain(seed){
   group.add(mesh);
   group.add(cloudGroup);
   group.add(portalMeshLocal);
-
   scene.add(group);
 
   return { group, params, heightAt, portal: portalMeshLocal };
 }
 
-// simple circular-gradient sprite texture
+// cloud sprites
 function makeCloudTexture(){
   const s=128, cnv=document.createElement('canvas'); cnv.width=cnv.height=s;
   const ctx=cnv.getContext('2d');
-  const g=ctx.createRadialGradient(s/2,s/2,10, s/2,s/2,s/2);
+  const g=ctx.createRadialGradient(s/2,s/2,12, s/2,s/2,s/2);
   g.addColorStop(0,'rgba(255,255,255,0.9)');
   g.addColorStop(1,'rgba(255,255,255,0.0)');
   ctx.fillStyle=g; ctx.fillRect(0,0,s, s);
   const tex = new THREE.CanvasTexture(cnv); tex.anisotropy = 4; return tex;
 }
-
 function buildCloudLayer(seed, params){
   const rng = mulberry32(seed ^ 0xabcdef);
   const tex = makeCloudTexture();
   const grp = new THREE.Group();
   const spriteMat = new THREE.SpriteMaterial({ map: tex, transparent:true, depthWrite:false });
-  const count = 80;
+  const count = 160;
   for(let i=0;i<count;i++){
     const sp = new THREE.Sprite(spriteMat.clone());
-    sp.position.set(randRange(rng,-params.width*0.45, params.width*0.45), 320 + randRange(rng,-10,10), randRange(rng, -params.length*0.45, params.length*0.05));
-    const s = randRange(rng, 60, 140);
+    sp.position.set(randRange(rng,-params.width*0.6, params.width*0.6), 1500 + randRange(rng,-40,40), randRange(rng, -params.length*0.55, params.length*0.15));
+    const s = randRange(rng, 120, 260);
     sp.scale.set(s, s, 1);
-    sp.material.opacity = randRange(rng, 0.35, 0.75);
+    sp.material.opacity = randRange(rng, 0.28, 0.65);
     grp.add(sp);
   }
   return grp;
 }
 
-////////////////////////////// world management
+/* ========= world management ========= */
 function disposeWorld(){
   if (!terrain) return;
   scene.remove(terrain.group);
@@ -284,19 +301,20 @@ function disposeWorld(){
   portalMesh = null;
   terrain = null;
 }
-
 function generateWorld(seed){
   disposeWorld();
   terrain = buildTerrain(seed);
   portalMesh = terrain.portal;
   uiSeed.textContent = seed;
-  // start high & upstream
-  state.playerPos.set(0, 280, 220);
-  state.playerQuat.identity().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(12)));
-  state.vel.set(0, -10, -20);
+
+  // start high & upstream relative to map size
+  const startZ = terrain.params.length * 0.40; // a bit forward of center
+  state.playerPos.set(0, 1200, startZ);
+  state.playerQuat.identity().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(10)));
+  state.vel.set(0, -14, -40);
 }
 
-////////////////////////////// input
+/* ========= input ========= */
 function setKey(e, down){
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
   switch(e.code){
@@ -313,13 +331,14 @@ function setKey(e, down){
 window.addEventListener('keydown', e=>setKey(e,true), {passive:false});
 window.addEventListener('keyup',   e=>setKey(e,false), {passive:false});
 
-////////////////////////////// game flow
+/* ========= game flow ========= */
 function doCrash(){ state.crashed=true; crashEl.style.display='grid'; state.highScore = Math.max(state.highScore, state.score|0); document.getElementById('uiHi').textContent = state.highScore.toFixed(0); }
 function togglePause(){ state.paused=!state.paused; pausedEl.style.display = state.paused ? 'grid' : 'none'; }
 function restart(){
-  state.playerPos.set(0, 280, 220);
-  state.playerQuat.identity().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(12)));
-  state.vel.set(0, -10, -20);
+  const startZ = terrain ? terrain.params.length * 0.40 : 3200;
+  state.playerPos.set(0, 1200, startZ);
+  state.playerQuat.identity().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), THREE.MathUtils.degToRad(10)));
+  state.vel.set(0, -14, -40);
   state.score=0; state.multiplier=1; state.crashed=false;
   crashEl.style.display='none';
 }
@@ -329,6 +348,7 @@ function nextWorld(){
   generateWorld(state.worldSeed);
 }
 
+/* ========= layout ========= */
 function resize(){
   const w=window.innerWidth, h=window.innerHeight;
   renderer.setSize(w,h);
@@ -339,7 +359,7 @@ resize();
 
 generateWorld(state.worldSeed);
 
-////////////////////////////// loop
+/* ========= loop ========= */
 function terrainDistanceBelow(pos){
   const yGround = terrain.heightAt(pos.x, pos.z);
   return pos.y - yGround;
@@ -373,15 +393,15 @@ renderer.setAnimationLoop(()=>{
 
   // small horizontal nudge so you keep moving
   const horiz = new THREE.Vector3(state.vel.x,0,state.vel.z); const hlen=horiz.length();
-  if (hlen < 8){ const fH = new THREE.Vector3(fwd.x,0,fwd.z).normalize(); state.vel.addScaledVector(fH, (8 - hlen) * 0.35); }
+  if (hlen < 10){ const fH = new THREE.Vector3(fwd.x,0,fwd.z).normalize(); state.vel.addScaledVector(fH, (10 - hlen) * 0.35); }
 
   state.playerPos.addScaledVector(state.vel, dt);
 
-  // camera
-  const camOffLocal = new THREE.Vector3(0, 2.2, 9.0);
+  // camera (a bit above and back)
+  const camOffLocal = new THREE.Vector3(0, 3.0, 14.0);
   const camPos = camOffLocal.clone().applyQuaternion(state.playerQuat).add(state.playerPos);
-  camera.position.lerp(camPos, 0.2);
-  camera.lookAt(state.playerPos.clone().add(fwd.clone().multiplyScalar(18)));
+  camera.position.lerp(camPos, 0.18);
+  camera.lookAt(state.playerPos.clone().add(fwd.clone().multiplyScalar(28)));
 
   // glider
   glider.position.copy(state.playerPos);
@@ -392,12 +412,20 @@ renderer.setAnimationLoop(()=>{
   const nearestDist = distBelow - state.playerRadius;
   if (nearestDist < 0) { doCrash(); renderer.render(scene,camera); return; }
 
+  // shadow marker under player for altitude cue
+  const yGround = state.playerPos.y - distBelow;
+  const shadowSize = clamp(24 + distBelow*0.12, 24, 400);
+  const shadowAlpha = clamp(0.85 - distBelow/1200, 0.15, 0.85);
+  shadowSprite.position.set(state.playerPos.x, yGround + 0.2, state.playerPos.z);
+  shadowSprite.scale.set(shadowSize, shadowSize, 1);
+  shadowSprite.material.opacity = shadowAlpha;
+
   // scoring (closer to ground ⇒ more score)
   const closeness = clamp(1 - (nearestDist / state.proxThreshold), 0, 1);
   const gain = (4 + spd * 0.16) * state.multiplier * (0.25 + closeness * 1.4);
   state.score += gain * dt;
   if (closeness > 0.15) state.multiplier = Math.min(state.maxMultiplier, state.multiplier + dt * (0.15 + closeness * 0.45));
-  else state.multiplier = Math.max(1, state.multiplier - dt * 1.2);
+  else state.multiplier = Math.max(1, state.multiplier - dt * 1.0);
 
   // portal at far end
   if (portalMesh){
@@ -411,6 +439,7 @@ renderer.setAnimationLoop(()=>{
   uiScore.textContent = state.score.toFixed(0);
   uiMult.textContent  = state.multiplier.toFixed(1);
   uiSpeed.textContent = spd.toFixed(1);
+  uiAlt.textContent   = distBelow.toFixed(0);
   uiSeed.textContent  = state.worldSeed;
   uiDiff.textContent  = state.difficulty;
 
